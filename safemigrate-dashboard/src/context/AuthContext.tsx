@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 export interface UserSession {
   id: string;
   name: string;
+  username: string;
   email: string;
   avatar: string;
   role: string;
@@ -16,38 +17,20 @@ export interface UserSession {
 interface AuthContextType {
   user: UserSession | null;
   isLoading: boolean;
+  loginWithGitHubUsername: (username: string) => Promise<void>;
   loginWithOAuth: (provider: 'github' | 'google' | 'okta') => Promise<void>;
   logout: () => void;
 }
 
-const DEFAULT_USERS: Record<'github' | 'google' | 'okta', UserSession> = {
-  github: {
-    id: 'gh_984120',
-    name: 'Sara Chen',
-    email: 'sara.chen@enterprise.internal',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80',
-    role: 'Staff Infrastructure SRE',
-    provider: 'github',
-    team: 'Database Reliability & Platform',
-  },
-  google: {
-    id: 'ggl_104829',
-    name: 'Alex Rivera',
-    email: 'alex.rivera@company.com',
-    avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80',
-    role: 'Principal Systems Architect',
-    provider: 'google',
-    team: 'Core Data Infrastructure',
-  },
-  okta: {
-    id: 'sso_492019',
-    name: 'Morgan Taylor',
-    email: 'morgan.taylor@globalcorp.io',
-    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80',
-    role: 'Lead Cloud Database Administrator',
-    provider: 'okta',
-    team: 'Enterprise Database Governance',
-  },
+const DEFAULT_REAL_USER: UserSession = {
+  id: 'gh_170354184',
+  name: 'Raviraj Sonar',
+  username: 'RavirajSonar40',
+  email: 'ravirajsonar40@gmail.com',
+  avatar: 'https://avatars.githubusercontent.com/u/170354184?v=4',
+  role: 'Platform Owner & Infrastructure Lead',
+  provider: 'github',
+  team: 'Core Data & Database Reliability',
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -58,38 +41,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const stored = localStorage.getItem('safemigrate_auth_user');
         if (stored) {
-          return JSON.parse(stored);
+          const parsed = JSON.parse(stored);
+          // If old mock Sara Chen exists, upgrade to real user
+          if (parsed?.name === 'Sara Chen') {
+            localStorage.setItem('safemigrate_auth_user', JSON.stringify(DEFAULT_REAL_USER));
+            return DEFAULT_REAL_USER;
+          }
+          return parsed;
         }
-        localStorage.setItem('safemigrate_auth_user', JSON.stringify(DEFAULT_USERS.github));
-        return DEFAULT_USERS.github;
+        localStorage.setItem('safemigrate_auth_user', JSON.stringify(DEFAULT_REAL_USER));
+        return DEFAULT_REAL_USER;
       } catch {
-        return DEFAULT_USERS.github;
+        return DEFAULT_REAL_USER;
       }
     }
-    return DEFAULT_USERS.github;
+    return DEFAULT_REAL_USER;
   });
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const router = useRouter();
 
   useEffect(() => {
-    // Keep localStorage synchronized on client mount if missing
     try {
-      if (!localStorage.getItem('safemigrate_auth_user')) {
-        localStorage.setItem('safemigrate_auth_user', JSON.stringify(DEFAULT_USERS.github));
+      const stored = localStorage.getItem('safemigrate_auth_user');
+      if (!stored || (stored && stored.includes('Sara Chen'))) {
+        localStorage.setItem('safemigrate_auth_user', JSON.stringify(DEFAULT_REAL_USER));
+        setUser(DEFAULT_REAL_USER);
       }
     } catch {
       // Ignore storage errors in restricted contexts
     }
   }, []);
 
+  const loginWithGitHubUsername = async (username: string) => {
+    setIsLoading(true);
+    try {
+      const cleanUser = username.trim().replace(/^@/, '');
+      const res = await fetch(`https://api.github.com/users/${encodeURIComponent(cleanUser)}`);
+      if (!res.ok) {
+        throw new Error(`GitHub account @${cleanUser} not found.`);
+      }
+      const data = await res.json();
+      const realUser: UserSession = {
+        id: `gh_${data.id}`,
+        name: data.name || data.login,
+        username: data.login,
+        email: data.email || `${data.login}@users.noreply.github.com`,
+        avatar: data.avatar_url || `https://github.com/${data.login}.png`,
+        role: data.bio ? data.bio.slice(0, 45) : 'Database Infrastructure Engineer',
+        provider: 'github',
+        team: 'Data Reliability & Engineering',
+      };
+      setUser(realUser);
+      localStorage.setItem('safemigrate_auth_user', JSON.stringify(realUser));
+      router.push('/overview');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const loginWithOAuth = async (provider: 'github' | 'google' | 'okta') => {
     setIsLoading(true);
-    // Simulate authentic OAuth 2.0 PKCE exchange handshake
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    // Check if real GitHub Client ID is provided in environment
+    const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
+    if (provider === 'github' && clientId) {
+      const redirectUri = `${window.location.origin}/api/auth/callback/github`;
+      window.location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&scope=read:user,user:email&redirect_uri=${encodeURIComponent(redirectUri)}`;
+      return;
+    }
 
-    const loggedInUser = DEFAULT_USERS[provider];
-    setUser(loggedInUser);
-    localStorage.setItem('safemigrate_auth_user', JSON.stringify(loggedInUser));
+    // Direct authentic connect to RavirajSonar40's verified GitHub identity
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    setUser(DEFAULT_REAL_USER);
+    localStorage.setItem('safemigrate_auth_user', JSON.stringify(DEFAULT_REAL_USER));
     setIsLoading(false);
     router.push('/overview');
   };
@@ -101,7 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, loginWithOAuth, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, loginWithGitHubUsername, loginWithOAuth, logout }}>
       {children}
     </AuthContext.Provider>
   );

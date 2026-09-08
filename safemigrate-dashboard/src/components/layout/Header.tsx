@@ -163,15 +163,15 @@ export default function Header() {
             >
               <div className="relative flex items-center">
                 <img
-                  src={user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
+                  src={user?.avatar || 'https://github.com/RavirajSonar40.png'}
                   alt={user?.name || 'User Avatar'}
                   className="w-8 h-8 rounded-full object-cover border border-primary/40 ring-1 ring-primary/20"
                 />
                 <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-primary ring-2 ring-surface-container-lowest"></span>
               </div>
               <div className="hidden md:flex flex-col text-left leading-none">
-                <span className="text-xs font-semibold text-on-surface">{user?.name || 'Sara Chen'}</span>
-                <span className="text-[10px] font-mono text-primary mt-0.5">{user?.role || 'Staff SRE'}</span>
+                <span className="text-xs font-semibold text-on-surface">{user?.name || 'Raviraj Sonar'}</span>
+                <span className="text-[10px] font-mono text-primary mt-0.5">@{user?.username || 'RavirajSonar40'}</span>
               </div>
               <span className="material-symbols-outlined text-[16px] text-outline">expand_more</span>
             </button>
@@ -181,15 +181,15 @@ export default function Header() {
               <div className="absolute right-0 top-12 w-64 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-2xl p-3 z-50 animate-fade-in flex flex-col gap-3">
                 <div className="flex items-center gap-3 pb-2.5 border-b border-outline-variant/15">
                   <img
-                    src={user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80'}
+                    src={user?.avatar || 'https://github.com/RavirajSonar40.png'}
                     alt="User"
                     className="w-10 h-10 rounded-full object-cover border border-primary/40"
                   />
                   <div className="flex flex-col truncate">
-                    <span className="text-xs font-bold text-on-surface">{user?.name || 'Sara Chen'}</span>
-                    <span className="text-[10px] text-on-surface-variant truncate">{user?.email || 'sara.chen@enterprise.internal'}</span>
+                    <span className="text-xs font-bold text-on-surface">{user?.name || 'Raviraj Sonar'}</span>
+                    <span className="text-[10px] text-on-surface-variant truncate">{user?.email || 'ravirajsonar40@gmail.com'}</span>
                     <span className="text-[10px] font-mono text-primary uppercase mt-0.5">
-                      OAuth 2.0: {user?.provider || 'GitHub'}
+                      Verified GitHub: @{user?.username || 'RavirajSonar40'}
                     </span>
                   </div>
                 </div>

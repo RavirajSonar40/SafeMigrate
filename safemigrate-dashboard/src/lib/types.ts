@@ -60,6 +60,7 @@ export interface MigrationResponse {
 export interface CreateMigrationRequest {
   tableName: string;
   ddlStatement: string;
+  databaseId?: string;
   batchSize?: number;
   maxAllowedLagBytes?: number;
   maxWaitTimeoutMs?: number;

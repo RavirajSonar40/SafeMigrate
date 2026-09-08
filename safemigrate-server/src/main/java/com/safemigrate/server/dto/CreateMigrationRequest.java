@@ -10,6 +10,7 @@ public class CreateMigrationRequest {
     @NotBlank(message = "ddlStatement must not be blank")
     private String ddlStatement;
 
+    private String databaseId;
     private Integer batchSize;
     private Long throttleDelayMs;
     private Boolean autoCutover;
@@ -44,6 +45,14 @@ public class CreateMigrationRequest {
 
     public void setDdlStatement(String ddlStatement) {
         this.ddlStatement = ddlStatement;
+    }
+
+    public String getDatabaseId() {
+        return databaseId;
+    }
+
+    public void setDatabaseId(String databaseId) {
+        this.databaseId = databaseId;
     }
 
     public Integer getBatchSize() {

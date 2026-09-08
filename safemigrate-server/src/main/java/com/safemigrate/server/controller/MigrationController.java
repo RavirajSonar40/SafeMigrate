@@ -87,7 +87,7 @@ public class MigrationController {
 
     @PostMapping("/preflight")
     public ResponseEntity<PreflightReport> runPreflightCheck(@RequestBody @Valid PreflightCheckRequest request) throws SQLException {
-        PreflightReport report = migrationService.runPreflightCheck(request.getTableName(), request.getDdlStatement());
+        PreflightReport report = migrationService.runPreflightCheck(request.getTableName(), request.getDdlStatement(), request.getDatabaseId());
         return ResponseEntity.ok(report);
     }
 }

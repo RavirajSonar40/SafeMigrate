@@ -22,8 +22,8 @@ export default function Sidebar() {
   const navItems = [
     { label: 'Overview', href: '/overview', icon: 'dashboard', isLink: true },
     { label: 'Migrations', href: '/overview#migrations', icon: 'move_up', isLink: true },
-    { label: 'Databases', modalKey: 'databases', icon: 'database', isLink: false },
-    { label: 'Tables', modalKey: 'tables', icon: 'table_chart', isLink: false },
+    { label: 'Databases', href: '/databases', icon: 'database', isLink: true },
+    { label: 'DB Explorer', href: '/explorer', icon: 'table_chart', isLink: true },
     { label: 'Workers', modalKey: 'workers', icon: 'sync_alt', isLink: false },
     { label: 'Events', modalKey: 'events', icon: 'stream', isLink: false },
     { label: 'Approvals', modalKey: 'approvals', icon: 'verified_user', badge: '1', isLink: false },
@@ -101,7 +101,7 @@ export default function Sidebar() {
         </div>
 
         {/* Footer Engine Status */}
-        <div className="p-4 border-t border-outline-variant/20 bg-surface-container-lowest/60">
+        <div className="p-3 border-t border-outline-variant/20 bg-surface-container-lowest/60 flex flex-col gap-2">
           <div className="flex items-center justify-between text-on-surface-variant text-xs font-mono">
             <span className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-primary inline-block animate-pulse"></span>
@@ -111,6 +111,15 @@ export default function Sidebar() {
               HEALTHY
             </span>
           </div>
+          <a
+            href="https://github.com/RavirajSonar40/SafeMigrate/actions"
+            target="_blank"
+            rel="noreferrer"
+            className="text-[10px] font-mono text-outline hover:text-primary transition-colors flex items-center justify-between border-t border-outline-variant/10 pt-1.5"
+          >
+            <span>Live CI/CD Logs</span>
+            <span className="material-symbols-outlined text-[13px]">open_in_new</span>
+          </a>
         </div>
       </aside>
 

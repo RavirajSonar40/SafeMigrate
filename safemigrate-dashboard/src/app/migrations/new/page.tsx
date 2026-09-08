@@ -1,17 +1,30 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { runPreflight, submitMigration } from '@/lib/api';
 
 type PrimitiveType = 'add-column' | 'rename-column' | 'alter-type' | 'add-index' | 'add-constraint' | 'raw-sql';
 
-export default function CreateMigrationPage() {
+interface DatabaseOption {
+  id: string;
+  name: string;
+  databaseName: string;
+}
+
+function CreateMigrationForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const tableParam = searchParams.get('table');
+  const dbParam = searchParams.get('db');
+
+  const [databases, setDatabases] = useState<DatabaseOption[]>([]);
+  const [selectedDb, setSelectedDb] = useState<string>(dbParam || 'default-postgres');
+  const [availableTables, setAvailableTables] = useState<string[]>([]);
 
   const [selectedPrimitive, setSelectedPrimitive] = useState<PrimitiveType>('add-column');
-  const [tableName, setTableName] = useState<string>('orders');
+  const [tableName, setTableName] = useState<string>(tableParam || 'orders');
   const [columnName, setColumnName] = useState<string>('priority_score');
   const [dataType, setDataType] = useState<string>('INTEGER');
   const [defaultValue, setDefaultValue] = useState<string>('0');
@@ -22,6 +35,42 @@ export default function CreateMigrationPage() {
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
 
   const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Load databases
+  useEffect(() => {
+    fetch('/api/databases')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setDatabases(data);
+          if (dbParam && data.some((d: DatabaseOption) => d.id === dbParam)) {
+            setSelectedDb(dbParam);
+          } else {
+            setSelectedDb(data[0].id);
+          }
+        }
+      })
+      .catch((err) => console.error('Failed to fetch databases:', err));
+  }, [dbParam]);
+
+  // Load tables for selected database
+  useEffect(() => {
+    if (!selectedDb) return;
+    fetch(`/api/databases/${selectedDb}/tables`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data)) {
+          const names = data.map((t: { tableName: string }) => t.tableName);
+          setAvailableTables(names);
+          if (tableParam && names.includes(tableParam)) {
+            setTableName(tableParam);
+          } else if (names.length > 0 && !tableParam) {
+            setTableName(names[0]);
+          }
+        }
+      })
+      .catch((err) => console.error('Failed to load tables for database:', err));
+  }, [selectedDb, tableParam]);
 
   useEffect(() => {
     return () => {
@@ -73,12 +122,13 @@ ALTER TABLE ${shadowTable}
     try {
       const cleanTable = tableName.replace(/^public\./, '').trim();
       // 1. Run live preflight check against Spring Boot
-      await runPreflight(cleanTable, generatedDdl);
+      await runPreflight(cleanTable, generatedDdl, selectedDb);
       
       // 2. Submit migration to Spring Boot backend
       const res = await submitMigration({
         tableName: cleanTable,
         ddlStatement: generatedDdl,
+        databaseId: selectedDb,
         batchSize: 500
       });
 
@@ -165,24 +215,40 @@ ALTER TABLE ${shadowTable}
                 Zero-Downtime Pipeline
               </span>
             </div>
-            <div className="flex items-center flex-wrap gap-2 text-xs text-on-surface-variant pt-2">
-              <span>Target:</span>
-              <span className="font-mono text-on-surface bg-surface-container px-2 py-0.5 rounded border border-outline-variant/20">
-                production-db-us-east
-              </span>
-              <span className="text-outline">·</span>
+            <div className="flex items-center flex-wrap gap-2 text-xs text-on-surface-variant pt-3 border-t border-outline-variant/10 mt-2">
+              <span className="text-outline font-mono">Target DB:</span>
               <select
-                value={tableName}
-                onChange={(e) => setTableName(e.target.value)}
-                className="font-mono text-primary font-medium bg-surface-container px-2 py-0.5 rounded border border-outline-variant/20 focus:outline-none cursor-pointer"
+                value={selectedDb}
+                onChange={(e) => setSelectedDb(e.target.value)}
+                className="font-mono text-on-surface bg-surface-container px-2 py-1 rounded border border-outline-variant/30 focus:border-primary outline-none cursor-pointer"
               >
-                <option value="public.orders">public.orders</option>
-                <option value="public.charges">public.charges</option>
-                <option value="public.user_profiles">public.user_profiles</option>
-                <option value="public.events_daily">public.events_daily</option>
+                {databases.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.name} ({d.databaseName})
+                  </option>
+                ))}
               </select>
               <span className="text-outline">·</span>
-              <span className="font-mono text-on-surface-variant">8,200,000 rows (14.2 GB)</span>
+              <span className="text-outline font-mono">Table:</span>
+              {availableTables.length > 0 ? (
+                <select
+                  value={tableName}
+                  onChange={(e) => setTableName(e.target.value)}
+                  className="font-mono text-primary font-medium bg-surface-container px-2 py-1 rounded border border-outline-variant/30 focus:border-primary outline-none cursor-pointer"
+                >
+                  {availableTables.map((t) => (
+                    <option key={t} value={t}>public.{t}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={tableName}
+                  onChange={(e) => setTableName(e.target.value)}
+                  placeholder="e.g. orders"
+                  className="font-mono text-primary font-medium bg-surface-container px-2 py-1 rounded border border-outline-variant/30 focus:border-primary outline-none"
+                />
+              )}
             </div>
           </div>
 
@@ -532,5 +598,13 @@ ALTER TABLE ${shadowTable}
         </div>
       </div>
     </div>
+  );
+}
+
+export default function CreateMigrationPage() {
+  return (
+    <Suspense fallback={<div className="p-12 text-center text-xs font-mono text-outline">Loading Migration Wizard...</div>}>
+      <CreateMigrationForm />
+    </Suspense>
   );
 }

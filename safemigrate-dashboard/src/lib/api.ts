@@ -55,12 +55,12 @@ export async function submitMigration(request: CreateMigrationRequest): Promise<
   return await res.json();
 }
 
-export async function runPreflight(tableName: string, ddlStatement: string): Promise<PreflightReport> {
+export async function runPreflight(tableName: string, ddlStatement: string, databaseId?: string): Promise<PreflightReport> {
   const cleanTable = tableName.replace(/^public\./, '').trim();
   const res = await fetch(`${API_BASE_URL}/preflight`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ tableName: cleanTable, ddlStatement })
+    body: JSON.stringify({ tableName: cleanTable, ddlStatement, databaseId })
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));

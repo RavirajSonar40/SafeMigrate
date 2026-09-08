@@ -10,6 +10,8 @@ public class PreflightCheckRequest {
     @NotBlank(message = "ddlStatement must not be blank")
     private String ddlStatement;
 
+    private String databaseId;
+
     public PreflightCheckRequest() {
     }
 
@@ -32,5 +34,13 @@ public class PreflightCheckRequest {
 
     public void setDdlStatement(String ddlStatement) {
         this.ddlStatement = ddlStatement;
+    }
+
+    public String getDatabaseId() {
+        return databaseId;
+    }
+
+    public void setDatabaseId(String databaseId) {
+        this.databaseId = databaseId;
     }
 }

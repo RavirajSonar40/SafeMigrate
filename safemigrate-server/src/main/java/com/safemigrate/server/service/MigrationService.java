@@ -51,6 +51,7 @@ public class MigrationService {
     private final PostgresReplicationConnectionFactory repConnFactory;
     private final MigrationSseService sseService;
     private final ExecutorService migrationExecutor;
+    private final DatabaseService databaseService;
 
     private final Map<String, MigrationSession> sessions = new ConcurrentHashMap<>();
 
@@ -59,16 +60,29 @@ public class MigrationService {
                             KafkaTopicManager topicManager,
                             PostgresReplicationConnectionFactory repConnFactory,
                             MigrationSseService sseService,
-                            @Qualifier("migrationExecutor") ExecutorService migrationExecutor) {
+                            @Qualifier("migrationExecutor") ExecutorService migrationExecutor,
+                            DatabaseService databaseService) {
         this.properties = properties;
         this.stateStore = stateStore;
         this.topicManager = topicManager;
         this.repConnFactory = repConnFactory;
         this.sseService = sseService;
         this.migrationExecutor = migrationExecutor;
+        this.databaseService = databaseService;
     }
 
     public Connection getConnection() throws SQLException {
+        return getConnection(null);
+    }
+
+    public Connection getConnection(String databaseId) throws SQLException {
+        if (databaseId != null && !databaseId.isBlank() && databaseService != null) {
+            try {
+                return databaseService.getConnectionFor(databaseId);
+            } catch (Exception e) {
+                log.warn("Could not connect to databaseId {}, falling back to default: {}", databaseId, e.getMessage());
+            }
+        }
         return DriverManager.getConnection(
                 properties.getTargetDb().getUrl(),
                 properties.getTargetDb().getUsername(),
@@ -77,7 +91,11 @@ public class MigrationService {
     }
 
     public PreflightReport runPreflightCheck(String tableName, String ddlStatement) throws SQLException {
-        try (Connection conn = getConnection()) {
+        return runPreflightCheck(tableName, ddlStatement, null);
+    }
+
+    public PreflightReport runPreflightCheck(String tableName, String ddlStatement, String databaseId) throws SQLException {
+        try (Connection conn = getConnection(databaseId)) {
             PreflightInspector inspector = new PreflightInspector(conn);
             return inspector.inspect(tableName, ddlStatement);
         }
@@ -102,7 +120,7 @@ public class MigrationService {
         // 1. Run Pre-Flight Inspection synchronously
         PreflightReport report;
         try {
-            report = runPreflightCheck(tableName, ddl);
+            report = runPreflightCheck(tableName, ddl, request.getDatabaseId());
             session.setPreflightReport(report);
             if (!report.passed()) {
                 session.setState(MigrationState.FAILED);
