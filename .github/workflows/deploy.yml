@@ -67,16 +67,17 @@ jobs:
         if: steps.check_secrets.outputs.configured == 'true'
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/id_rsa
+          printf "%s\n" "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Upload JARs to AWS EC2
         if: steps.check_secrets.outputs.configured == 'true'
+        continue-on-error: true
         run: |
-          ssh ubuntu@${{ secrets.AWS_HOST }} "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
-          scp safemigrate-server/target/*.jar ubuntu@${{ secrets.AWS_HOST }}:~/SafeMigrate/safemigrate-server/target/
-          scp safemigrate-core/target/*-worker.jar ubuntu@${{ secrets.AWS_HOST }}:~/SafeMigrate/safemigrate-core/target/
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@${{ secrets.AWS_HOST }} "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-server/target/*.jar ubuntu@${{ secrets.AWS_HOST }}:~/SafeMigrate/safemigrate-server/target/
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-core/target/*-worker.jar ubuntu@${{ secrets.AWS_HOST }}:~/SafeMigrate/safemigrate-core/target/
 
       - name: Update Code & Rebuild Docker Stack on AWS
         if: steps.check_secrets.outputs.configured == 'true'
@@ -130,16 +131,17 @@ jobs:
         if: steps.check_secrets.outputs.configured == 'true'
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/id_rsa
+          printf "%s\n" "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.ORACLE_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.ORACLE_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Upload JARs to Oracle Cloud
         if: steps.check_secrets.outputs.configured == 'true'
+        continue-on-error: true
         run: |
-          ssh ubuntu@${{ secrets.ORACLE_HOST }} "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
-          scp safemigrate-server/target/*.jar ubuntu@${{ secrets.ORACLE_HOST }}:~/SafeMigrate/safemigrate-server/target/
-          scp safemigrate-core/target/*-worker.jar ubuntu@${{ secrets.ORACLE_HOST }}:~/SafeMigrate/safemigrate-core/target/
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@${{ secrets.ORACLE_HOST }} "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-server/target/*.jar ubuntu@${{ secrets.ORACLE_HOST }}:~/SafeMigrate/safemigrate-server/target/
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-core/target/*-worker.jar ubuntu@${{ secrets.ORACLE_HOST }}:~/SafeMigrate/safemigrate-core/target/
 
       - name: Update Code & Rebuild Docker Stack on Oracle
         if: steps.check_secrets.outputs.configured == 'true'
