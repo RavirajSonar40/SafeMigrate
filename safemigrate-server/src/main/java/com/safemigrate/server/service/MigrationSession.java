@@ -202,6 +202,10 @@ public class MigrationSession {
         return totalSourceRows;
     }
 
+    public long getSourceRowCount() {
+        return totalSourceRows;
+    }
+
     public void setTotalSourceRows(long totalSourceRows) {
         this.totalSourceRows = totalSourceRows;
     }

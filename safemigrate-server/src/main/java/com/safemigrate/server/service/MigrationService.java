@@ -383,7 +383,7 @@ public class MigrationService {
             session.setApprovedBy("Cutover-Gate-Operator");
             session.setApprovedAt(Instant.now());
         }
-        if (session.getState() == MigrationState.BACKFILLING && session.getRowsBackfilled() >= session.getSourceRowCount()) {
+        if (session.getState() == MigrationState.BACKFILLING && session.getRowsBackfilled() >= session.getTotalSourceRows()) {
             session.setState(MigrationState.READY_CUTOVER);
         }
         if (session.getState() != MigrationState.READY_CUTOVER && session.getState() != MigrationState.CATCHING_UP) {
