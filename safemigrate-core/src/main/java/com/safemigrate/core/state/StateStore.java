@@ -95,7 +95,10 @@ public class StateStore implements AutoCloseable {
 
     public void checkpointAppliedLsn(String migrationId, long lsn) {
         RBucket<Long> bucket = redisson.getBucket("migration:" + migrationId + ":last_applied_lsn");
-        bucket.set(lsn);
+        Long current = bucket.get();
+        if (current == null || lsn > current) {
+            bucket.set(lsn);
+        }
     }
 
     public Long getLastAppliedLsn(String migrationId) {

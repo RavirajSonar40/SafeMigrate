@@ -161,7 +161,7 @@ public class ChangeApplier implements AutoCloseable {
 
         long lsn = event.lsn();
         if (lsn > 0) {
-            lastAppliedLsn.set(lsn);
+            lastAppliedLsn.accumulateAndGet(lsn, Math::max);
             if (stateStore != null && migrationId != null) {
                 stateStore.checkpointAppliedLsn(migrationId, lsn);
             }
