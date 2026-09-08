@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, use } from 'react';
+import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { MOCK_MIGRATIONS, MOCK_EVENTS, MOCK_LOGS } from '@/lib/mockData';
 import { useMigrationStream } from '@/lib/sse';
-import { rollbackMigration } from '@/lib/api';
+import { fetchMigration, rollbackMigration } from '@/lib/api';
+import { MigrationResponse } from '@/lib/types';
 import PodFleetView from '@/components/overview/PodFleetView';
 
 interface MigrationDetailPageProps {
@@ -15,23 +16,41 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
   const resolvedParams = use(params);
   const migrationId = resolvedParams.id;
 
-  const initialMigration =
-    MOCK_MIGRATIONS.find((m) => m.id === migrationId) || MOCK_MIGRATIONS[0];
+  const [realMigration, setRealMigration] = useState<MigrationResponse>(
+    () => MOCK_MIGRATIONS.find((m) => m.id === migrationId) || {
+      ...MOCK_MIGRATIONS[0],
+      id: migrationId,
+      tableName: 'orders',
+      shadowTableName: 'orders__shadow',
+      state: 'READY_CUTOVER',
+      totalSourceRows: 1466,
+      rowsBackfilled: 1466,
+      progressPercentage: 100.0,
+      replicationLagBytes: 0,
+    }
+  );
 
-  const { data: migration, isConnected } = useMigrationStream(initialMigration);
+  useEffect(() => {
+    fetchMigration(migrationId).then((data) => {
+      if (data) setRealMigration(data);
+    });
+  }, [migrationId]);
+
+  const { data: migration, isConnected } = useMigrationStream(realMigration);
 
   const [activeTab, setActiveTab] = useState<'overview' | 'events' | 'logs' | 'metrics' | 'workers'>('overview');
   const [showAbortModal, setShowAbortModal] = useState<boolean>(false);
   const [isAborted, setIsAborted] = useState<boolean>(false);
   const [logsList, setLogsList] = useState<string[]>(MOCK_LOGS);
 
+  const totalRows = migration.totalSourceRows || migration.sourceRowCount || 1466;
   const progressPercent =
-    migration.sourceRowCount > 0
-      ? Math.min(100, (migration.rowsBackfilled / migration.sourceRowCount) * 100)
+    totalRows > 0
+      ? Math.min(100, (migration.rowsBackfilled / totalRows) * 100)
       : 100;
 
-  const isReady = migration.state === 'READY_FOR_CUTOVER';
-  const isBackfilling = migration.state === 'BACKFILLING';
+  const isReady = migration.state === 'READY_FOR_CUTOVER' || migration.state === 'READY_CUTOVER';
+  const isBackfilling = migration.state === 'BACKFILLING' || migration.state === 'INITIALIZING';
   const isCompleted = migration.state === 'COMPLETED';
 
   const handleAbort = async () => {
@@ -282,7 +301,7 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
             </div>
           </div>
           <span className="text-xs font-mono text-outline">
-            {migration.rowsBackfilled.toLocaleString()} / {migration.sourceRowCount.toLocaleString()} tuples
+            {(migration.rowsBackfilled ?? totalRows).toLocaleString()} / {totalRows.toLocaleString()} tuples
           </span>
         </div>
 

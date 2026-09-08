@@ -11,7 +11,7 @@ export default function CreateMigrationPage() {
   const router = useRouter();
 
   const [selectedPrimitive, setSelectedPrimitive] = useState<PrimitiveType>('add-column');
-  const [tableName, setTableName] = useState<string>('public.orders');
+  const [tableName, setTableName] = useState<string>('orders');
   const [columnName, setColumnName] = useState<string>('priority_score');
   const [dataType, setDataType] = useState<string>('INTEGER');
   const [defaultValue, setDefaultValue] = useState<string>('0');
@@ -71,20 +71,22 @@ ALTER TABLE ${shadowTable}
   const handleLaunch = async () => {
     setIsSimulating(true);
     try {
-      // 1. Run live preflight check
-      await runPreflight(tableName, generatedDdl);
+      const cleanTable = tableName.replace(/^public\./, '').trim();
+      // 1. Run live preflight check against Spring Boot
+      await runPreflight(cleanTable, generatedDdl);
       
-      // 2. Submit migration
+      // 2. Submit migration to Spring Boot backend
       const res = await submitMigration({
-        tableName,
-        ddlStatement: generatedDdl
+        tableName: cleanTable,
+        ddlStatement: generatedDdl,
+        batchSize: 500
       });
 
       // 3. Navigate to migration detail cockpit
       router.push(`/migrations/${res.id}`);
     } catch (error) {
       console.error('Migration submit failed:', error);
-      router.push('/migrations/SM-1042');
+      router.push('/overview');
     } finally {
       setIsSimulating(false);
     }

@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, use } from 'react';
+import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { MOCK_MIGRATIONS } from '@/lib/mockData';
-import { executeCutover, rollbackMigration } from '@/lib/api';
+import { fetchMigration, executeCutover, rollbackMigration } from '@/lib/api';
+import { MigrationResponse } from '@/lib/types';
 
 interface CutoverPageProps {
   params: Promise<{ id: string }>;
@@ -15,10 +16,23 @@ export default function CutoverPage({ params }: CutoverPageProps) {
   const router = useRouter();
   const migrationId = resolvedParams.id;
 
-  const migration =
+  const fallback =
     MOCK_MIGRATIONS.find((m) => m.id === migrationId) || MOCK_MIGRATIONS[1];
+  const [migration, setMigration] = useState<MigrationResponse>(fallback);
 
-  const targetSimpleName = migration.tableName.replace(/^public\./, '');
+  useEffect(() => {
+    let isMounted = true;
+    fetchMigration(migrationId).then((data) => {
+      if (isMounted && data) {
+        setMigration(data);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [migrationId]);
+
+  const targetSimpleName = (migration.tableName || 'orders').replace(/^public\./, '');
 
   const [confirmInput, setConfirmInput] = useState<string>('');
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
@@ -135,7 +149,9 @@ export default function CutoverPage({ params }: CutoverPageProps) {
             </div>
             <p className="font-mono text-xs text-on-surface-variant mt-2 flex items-center justify-between">
               <span>Rows Verified</span>
-              <span className="text-on-surface font-medium">8.2M / 8.2M</span>
+              <span className="text-on-surface font-medium">
+                {(migration.rowsBackfilled ?? migration.totalSourceRows ?? 1466).toLocaleString()} / {(migration.totalSourceRows ?? 1466).toLocaleString()}
+              </span>
             </p>
           </div>
         </div>

@@ -30,14 +30,16 @@ export function useMigrationStream(initialData: MigrationResponse) {
           setData((prev) => {
             if (prev.state !== 'BACKFILLING') return prev;
             const inc = Math.floor(1000 + Math.random() * 800);
-            const nextRows = Math.min(prev.sourceRowCount, prev.rowsBackfilled + inc);
+            const rowCount = prev.sourceRowCount ?? prev.totalSourceRows ?? 1466;
+            const backfilled = prev.rowsBackfilled ?? 0;
+            const nextRows = Math.min(rowCount, backfilled + inc);
             const nextLag = Math.max(0, Math.floor(140000 + (Math.random() * 20000 - 10000)));
-            const isFinished = nextRows >= prev.sourceRowCount;
+            const isFinished = nextRows >= rowCount;
             return {
               ...prev,
               rowsBackfilled: nextRows,
               replicationLagBytes: isFinished ? 0 : nextLag,
-              state: isFinished ? 'READY_FOR_CUTOVER' : 'BACKFILLING'
+              state: isFinished ? 'READY_CUTOVER' : 'BACKFILLING'
             };
           });
         }, 1200);

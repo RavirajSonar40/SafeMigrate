@@ -4,6 +4,7 @@ export type MigrationState =
   | 'BACKFILLING'
   | 'CATCHING_UP'
   | 'READY_FOR_CUTOVER'
+  | 'READY_CUTOVER'
   | 'CUTTING_OVER'
   | 'COMPLETED'
   | 'ROLLED_BACK'
@@ -20,9 +21,11 @@ export interface PreflightReport {
   tableName: string;
   passed: boolean;
   issues: PreflightIssue[];
-  estimatedRows: number;
-  tableSizeBytes: number;
-  activeLocksDetected: number;
+  estimatedRows?: number;
+  tableSizeBytes?: number;
+  activeLocksDetected?: number;
+  warnings?: string[];
+  errors?: string[];
 }
 
 export interface MigrationResponse {
@@ -31,8 +34,10 @@ export interface MigrationResponse {
   shadowTableName: string;
   ddlStatement: string;
   state: MigrationState;
-  sourceRowCount: number;
+  totalSourceRows?: number;
+  sourceRowCount?: number;
   rowsBackfilled: number;
+  progressPercentage?: number;
   replicationLagBytes: number;
   createdAt: string;
   startedAt?: string;
