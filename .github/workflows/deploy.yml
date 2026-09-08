@@ -6,40 +6,141 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy-aws:
-    name: Deploy to AWS EC2
+  build:
+    name: Build Artifacts (Maven)
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to AWS via SSH
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build JARs with Maven
+        run: mvn clean package -DskipTests
+
+      - name: Upload Server JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-jar
+          path: safemigrate-server/target/*.jar
+
+      - name: Upload Worker JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-jar
+          path: safemigrate-core/target/*-worker.jar
+
+  deploy-aws:
+    name: Deploy to AWS EC2
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check AWS Secrets Configured
+        id: check_secrets
+        run: |
+          if [ -n "${{ secrets.AWS_HOST }}" ] && [ -n "${{ secrets.AWS_SSH_KEY }}" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download Server JAR
+        if: steps.check_secrets.outputs.configured == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: server-jar
+          path: safemigrate-server/target
+
+      - name: Download Worker JAR
+        if: steps.check_secrets.outputs.configured == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: worker-jar
+          path: safemigrate-core/target
+
+      - name: Setup SSH
+        if: steps.check_secrets.outputs.configured == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Upload JARs to AWS EC2
+        if: steps.check_secrets.outputs.configured == 'true'
+        run: |
+          ssh ubuntu@${{ secrets.AWS_HOST }} "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
+          scp safemigrate-server/target/*.jar ubuntu@${{ secrets.AWS_HOST }}:~/SafeMigrate/safemigrate-server/target/
+          scp safemigrate-core/target/*-worker.jar ubuntu@${{ secrets.AWS_HOST }}:~/SafeMigrate/safemigrate-core/target/
+
+      - name: Update Code & Rebuild Docker Stack on AWS
+        if: steps.check_secrets.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.0.3
-        if: "${{ secrets.AWS_HOST != '' && secrets.AWS_SSH_KEY != '' }}"
         with:
           host: ${{ secrets.AWS_HOST }}
           username: ubuntu
           key: ${{ secrets.AWS_SSH_KEY }}
           script: |
-            if [ ! -d "SafeMigrate" ]; then
-              git clone https://github.com/RavirajSonar40/SafeMigrate.git
-            fi
-            cd SafeMigrate
+            cd ~/SafeMigrate
             git pull origin main
             docker compose up -d --build
 
   deploy-oracle:
     name: Deploy to Oracle Cloud
+    needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to Oracle via SSH
+      - name: Check Oracle Secrets Configured
+        id: check_secrets
+        run: |
+          if [ -n "${{ secrets.ORACLE_HOST }}" ] && [ -n "${{ secrets.ORACLE_SSH_KEY }}" ]; then
+            echo "configured=true" >> $GITHUB_OUTPUT
+          else
+            echo "configured=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download Server JAR
+        if: steps.check_secrets.outputs.configured == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: server-jar
+          path: safemigrate-server/target
+
+      - name: Download Worker JAR
+        if: steps.check_secrets.outputs.configured == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: worker-jar
+          path: safemigrate-core/target
+
+      - name: Setup SSH
+        if: steps.check_secrets.outputs.configured == 'true'
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.ORACLE_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Upload JARs to Oracle Cloud
+        if: steps.check_secrets.outputs.configured == 'true'
+        run: |
+          ssh ubuntu@${{ secrets.ORACLE_HOST }} "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
+          scp safemigrate-server/target/*.jar ubuntu@${{ secrets.ORACLE_HOST }}:~/SafeMigrate/safemigrate-server/target/
+          scp safemigrate-core/target/*-worker.jar ubuntu@${{ secrets.ORACLE_HOST }}:~/SafeMigrate/safemigrate-core/target/
+
+      - name: Update Code & Rebuild Docker Stack on Oracle
+        if: steps.check_secrets.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.0.3
-        if: "${{ secrets.ORACLE_HOST != '' && secrets.ORACLE_SSH_KEY != '' }}"
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ubuntu
           key: ${{ secrets.ORACLE_SSH_KEY }}
           script: |
-            if [ ! -d "SafeMigrate" ]; then
-              git clone https://github.com/RavirajSonar40/SafeMigrate.git
-            fi
-            cd SafeMigrate
+            cd ~/SafeMigrate
             git pull origin main
             docker compose up -d --build
