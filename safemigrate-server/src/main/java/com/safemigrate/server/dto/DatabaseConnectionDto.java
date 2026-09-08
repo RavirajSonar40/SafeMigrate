@@ -147,7 +147,12 @@ public class DatabaseConnectionDto {
     }
 
     public String getJdbcUrl() {
-        return String.format("jdbc:postgresql://%s:%d/%s%s", host, port, databaseName, sslMode ? "?sslmode=require" : "");
+        boolean useSsl = sslMode || (host != null && host.contains("supabase."));
+        if (!useSsl) {
+            return String.format("jdbc:postgresql://%s:%d/%s", host, port, databaseName);
+        }
+        String sep = databaseName != null && databaseName.contains("?") ? "&" : "?";
+        return String.format("jdbc:postgresql://%s:%d/%s%ssslmode=require", host, port, databaseName, sep);
     }
 
     // Mask password in serialized responses

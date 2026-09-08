@@ -22,7 +22,72 @@ public class DatabaseService {
 
     public DatabaseService(SafeMigrateProperties properties) {
         this.properties = properties;
-        initDefaultConnection();
+        initPlatformStorage();
+    }
+
+    private Connection getPlatformConnection() throws SQLException {
+        return DriverManager.getConnection(
+                properties.getTargetDb().getUrl(),
+                properties.getTargetDb().getUsername(),
+                properties.getTargetDb().getPassword()
+        );
+    }
+
+    private void initPlatformStorage() {
+        try (Connection c = getPlatformConnection();
+             Statement s = c.createStatement()) {
+            s.execute("""
+                CREATE TABLE IF NOT EXISTS configured_databases (
+                    id VARCHAR(64) PRIMARY KEY,
+                    name VARCHAR(128) NOT NULL,
+                    host VARCHAR(255) NOT NULL,
+                    port INT NOT NULL,
+                    database_name VARCHAR(128) NOT NULL,
+                    username VARCHAR(128) NOT NULL,
+                    password TEXT NOT NULL,
+                    ssl_mode BOOLEAN DEFAULT FALSE,
+                    is_default BOOLEAN DEFAULT FALSE,
+                    status VARCHAR(32) DEFAULT 'DISCONNECTED',
+                    wal_level VARCHAR(32),
+                    postgres_version VARCHAR(128),
+                    latency_ms BIGINT DEFAULT 0,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+                );
+            """);
+
+            try (ResultSet rs = s.executeQuery("SELECT * FROM configured_databases")) {
+                while (rs.next()) {
+                    DatabaseConnectionDto dto = new DatabaseConnectionDto(
+                            rs.getString("id"),
+                            rs.getString("name"),
+                            rs.getString("host"),
+                            rs.getInt("port"),
+                            rs.getString("database_name"),
+                            rs.getString("username"),
+                            rs.getString("password"),
+                            rs.getBoolean("ssl_mode"),
+                            rs.getBoolean("is_default")
+                    );
+                    dto.setStatus(rs.getString("status"));
+                    dto.setWalLevel(rs.getString("wal_level"));
+                    dto.setPostgresVersion(rs.getString("postgres_version"));
+                    dto.setLatencyMs(rs.getLong("latency_ms"));
+                    connections.put(dto.getId(), dto);
+                }
+            }
+            log.info("Loaded {} configured databases from PostgreSQL", connections.size());
+        } catch (Exception e) {
+            log.error("Failed to initialize or load configured_databases from DB: {}", e.getMessage());
+        }
+
+        if (!connections.containsKey("default-postgres")) {
+            initDefaultConnection();
+        }
+
+        if (!connections.containsKey("supabase-production")) {
+            initSupabaseConnection();
+        }
     }
 
     private void initDefaultConnection() {
@@ -30,7 +95,6 @@ public class DatabaseService {
         String user = properties.getTargetDb().getUsername();
         String pass = properties.getTargetDb().getPassword();
 
-        // Extract host, port, db name from jdbc url
         String host = "localhost";
         int port = 5432;
         String dbName = "safemigrate_test";
@@ -71,6 +135,89 @@ public class DatabaseService {
         defaultConn.setStatus("CONNECTED");
         defaultConn.setWalLevel("logical");
         connections.put(defaultConn.getId(), defaultConn);
+        persistToDatabase(defaultConn);
+    }
+
+    private void initSupabaseConnection() {
+        DatabaseConnectionDto supabaseConn = new DatabaseConnectionDto(
+                "supabase-production",
+                "Supabase Production (ap-southeast-1)",
+                "aws-0-ap-southeast-1.pooler.supabase.com",
+                5432,
+                "postgres",
+                "postgres.dtcfthsmmccfcjhtiwwd",
+                "4LIKzMjeK1R2ncwl",
+                true,
+                false
+        );
+        try {
+            DatabaseTestResult res = testConnection(supabaseConn);
+            if (res.isConnected()) {
+                supabaseConn.setStatus("CONNECTED");
+                supabaseConn.setWalLevel(res.getWalLevel());
+                supabaseConn.setPostgresVersion(res.getPostgresVersion());
+                supabaseConn.setLatencyMs(res.getLatencyMs());
+            } else {
+                supabaseConn.setStatus("ERROR");
+            }
+        } catch (Exception e) {
+            supabaseConn.setStatus("ERROR");
+        }
+        connections.put(supabaseConn.getId(), supabaseConn);
+        persistToDatabase(supabaseConn);
+    }
+
+    private void persistToDatabase(DatabaseConnectionDto conn) {
+        String sql = """
+            INSERT INTO configured_databases 
+            (id, name, host, port, database_name, username, password, ssl_mode, is_default, status, wal_level, postgres_version, latency_ms, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            host = EXCLUDED.host,
+            port = EXCLUDED.port,
+            database_name = EXCLUDED.database_name,
+            username = EXCLUDED.username,
+            password = EXCLUDED.password,
+            ssl_mode = EXCLUDED.ssl_mode,
+            is_default = EXCLUDED.is_default,
+            status = EXCLUDED.status,
+            wal_level = EXCLUDED.wal_level,
+            postgres_version = EXCLUDED.postgres_version,
+            latency_ms = EXCLUDED.latency_ms,
+            updated_at = CURRENT_TIMESTAMP;
+        """;
+        try (Connection c = getPlatformConnection();
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, conn.getId());
+            ps.setString(2, conn.getName());
+            ps.setString(3, conn.getHost());
+            ps.setInt(4, conn.getPort());
+            ps.setString(5, conn.getDatabaseName());
+            ps.setString(6, conn.getUsername());
+            ps.setString(7, conn.getPassword());
+            ps.setBoolean(8, conn.isSslMode());
+            ps.setBoolean(9, conn.isDefault());
+            ps.setString(10, conn.getStatus());
+            ps.setString(11, conn.getWalLevel());
+            ps.setString(12, conn.getPostgresVersion());
+            ps.setLong(13, conn.getLatencyMs());
+            ps.executeUpdate();
+            log.info("Persisted database connection {} ({}) to PostgreSQL", conn.getId(), conn.getName());
+        } catch (Exception e) {
+            log.error("Failed to persist database connection {} to PostgreSQL: {}", conn.getId(), e.getMessage());
+        }
+    }
+
+    private void deleteFromDatabase(String id) {
+        try (Connection c = getPlatformConnection();
+             PreparedStatement ps = c.prepareStatement("DELETE FROM configured_databases WHERE id = ? AND is_default = false")) {
+            ps.setString(1, id);
+            ps.executeUpdate();
+            log.info("Deleted database connection {} from PostgreSQL", id);
+        } catch (Exception e) {
+            log.error("Failed to delete database connection {} from PostgreSQL: {}", id, e.getMessage());
+        }
     }
 
     public List<DatabaseConnectionDto> listDatabases() {
@@ -126,6 +273,7 @@ public class DatabaseService {
         }
 
         connections.put(id, conn);
+        persistToDatabase(conn);
         return conn.sanitized();
     }
 
@@ -135,6 +283,7 @@ public class DatabaseService {
             throw new IllegalStateException("Cannot delete the default platform database connection.");
         }
         connections.remove(id);
+        deleteFromDatabase(id);
     }
 
     public DatabaseTestResult testConnection(DatabaseConnectionDto dto) {
