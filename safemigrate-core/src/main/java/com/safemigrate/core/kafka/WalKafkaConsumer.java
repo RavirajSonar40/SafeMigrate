@@ -52,11 +52,11 @@ public class WalKafkaConsumer implements AutoCloseable {
             return;
         }
         running.set(true);
-        consumer.subscribe(Collections.singletonList(topic));
 
         consumerThread = Thread.ofVirtual().name("kafka-consumer-" + topic).start(() -> {
             log.info("Started Kafka consumer on topic '{}'", topic);
             try {
+                consumer.subscribe(Collections.singletonList(topic));
                 while (running.get()) {
                     ConsumerRecords<String, String> records = consumer.poll(Duration.ofMillis(100));
                     for (ConsumerRecord<String, String> record : records) {
