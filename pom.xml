@@ -13,9 +13,9 @@
     <description>Zero-Downtime Online Schema Migration Platform for PostgreSQL</description>
 
     <modules>
+        <module>safemigrate-loadgen</module>
         <module>safemigrate-core</module>
         <module>safemigrate-server</module>
-        <module>safemigrate-loadgen</module>
     </modules>
 
     <properties>

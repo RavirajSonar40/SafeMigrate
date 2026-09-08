@@ -32,6 +32,7 @@ public class LoadGenerator {
     private final String jdbcUrl;
     private final String username;
     private final String password;
+    private final String tableName;
     private final int concurrency;
     private final int targetOpsPerSec;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -45,9 +46,14 @@ public class LoadGenerator {
     private final AtomicLong deleteCount = new AtomicLong(0);
 
     public LoadGenerator(String jdbcUrl, String username, String password, int concurrency, int targetOpsPerSec) {
+        this(jdbcUrl, username, password, "orders", concurrency, targetOpsPerSec);
+    }
+
+    public LoadGenerator(String jdbcUrl, String username, String password, String tableName, int concurrency, int targetOpsPerSec) {
         this.jdbcUrl = jdbcUrl;
         this.username = username;
         this.password = password;
+        this.tableName = tableName;
         this.concurrency = concurrency;
         this.targetOpsPerSec = targetOpsPerSec;
     }
@@ -145,7 +151,7 @@ public class LoadGenerator {
     }
 
     private void executeInsert(Connection conn, Random random) throws SQLException {
-        String sql = "INSERT INTO orders (customer_id, amount, status) VALUES (?, ?, ?)";
+        String sql = "INSERT INTO " + tableName + " (customer_id, amount, status) VALUES (?, ?, ?)";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setString(1, "cust_" + random.nextInt(1000));
             stmt.setBigDecimal(2, BigDecimal.valueOf(random.nextDouble() * 500 + 5).setScale(2, RoundingMode.HALF_UP));
@@ -158,7 +164,7 @@ public class LoadGenerator {
         long targetId = getRandomExistingId(conn, random);
         if (targetId <= 0) return;
 
-        String sql = "UPDATE orders SET amount = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?";
+        String sql = "UPDATE " + tableName + " SET amount = ?, status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setBigDecimal(1, BigDecimal.valueOf(random.nextDouble() * 700 + 10).setScale(2, RoundingMode.HALF_UP));
             stmt.setString(2, getRandomStatus(random));
@@ -171,7 +177,7 @@ public class LoadGenerator {
         long targetId = getRandomExistingId(conn, random);
         if (targetId <= 0) return;
 
-        String sql = "DELETE FROM orders WHERE id = ?";
+        String sql = "DELETE FROM " + tableName + " WHERE id = ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setLong(1, targetId);
             stmt.executeUpdate();
@@ -180,7 +186,7 @@ public class LoadGenerator {
 
     private long getRandomExistingId(Connection conn, Random random) {
         // Query an ID around a random offset
-        String sql = "SELECT id FROM orders LIMIT 1 OFFSET ?";
+        String sql = "SELECT id FROM " + tableName + " LIMIT 1 OFFSET ?";
         try (PreparedStatement stmt = conn.prepareStatement(sql)) {
             stmt.setInt(1, random.nextInt(500));
             try (ResultSet rs = stmt.executeQuery()) {

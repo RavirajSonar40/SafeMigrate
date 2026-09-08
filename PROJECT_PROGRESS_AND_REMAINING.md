@@ -59,6 +59,40 @@ SafeMigrate eliminates exclusive table locks during production schema changes (`
     $$\text{PostgreSQL} \xrightarrow{\text{INSERT / UPDATE / DELETE}} \text{WAL Stream} \xrightarrow{\text{WalReader}} \text{Kafka Producer} \xrightarrow{\text{Kafka Broker}} \text{Kafka Consumer}$$
   - Executed an INSERT, UPDATE, and DELETE on a live test table. All 3 events were intercepted, streamed, partitioned, and consumed in **3.14 seconds** with 100% field accuracy.
 
+### Phase 3: Backfill Engine & Redis State Store
+- **Redis Distributed State Store (`StateStore.java`)**:
+  - Built on **Redisson**; manages cluster-wide distributed locks (`safemigrate:lock:table:<tableName>`).
+  - Checkpoints `last_pk`, `rows_backfilled`, and replication LSNs to Redis in real time.
+  - Manages atomic migration state transitions (`INITIALIZING`, `BACKFILLING`, `CATCHING_UP`, `CUTTING_OVER`, `COMPLETED`, `FAILED`).
+- **Shadow Table Manager (`ShadowTableManager.java`)**:
+  - Inspects table primary keys and column metadata dynamically.
+  - Creates the shadow table using `CREATE TABLE <shadow> (LIKE <source> INCLUDING ALL)`.
+  - Applies target DDL schema alteration (e.g. `ADD COLUMN priority_score INT DEFAULT 0`) directly to shadow table.
+  - Automatically enforces `REPLICA IDENTITY FULL` on shadow table for complete tuple capture.
+- **Batched, Throttled Backfill Worker (`BackfillWorker.java`)**:
+  - Copies historical records in paged primary-key ranges (`WHERE id > ? ORDER BY id ASC LIMIT ?`).
+  - Uses `INSERT INTO shadow (...) VALUES (...) ON CONFLICT (pk) DO NOTHING` to ensure historical backfill **never** overwrites live writes that already arrived from the WAL.
+  - Supports configurable throttle delays (`throttleDelayMs`) between batches to prevent DB CPU or IOPS spikes.
+  - Checkpoints `last_pk` after each batch for crash-safe resume.
+- **Closed-Loop Integration Test (`BackfillWorkerIntegrationTest.java`)**:
+  - Verified 250 rows backfilled into a shadow table with a newly added column (`priority_score INT DEFAULT 42`).
+  - Tested worker restart from `last_pk = 100` and proved clean resumption with 0 duplicates.
+
+### Phase 4: Change Applier & Concurrency Convergence
+- **PostgreSQL Type Introspection & Explicit Casting (`ChangeApplier.java`)**:
+  - Automatically queries `information_schema.columns` to extract PostgreSQL internal type names (`udt_name`).
+  - Employs explicit SQL type casts: `CAST(? AS <udt_name>)` with `stmt.setNull(i, Types.OTHER)` support, guaranteeing type-safe replay across `bigint`, `numeric`, `timestamp`, `uuid`, and boolean columns.
+- **Idempotent Replay Engine**:
+  - `INSERT`: Replays as `INSERT INTO shadow (cols) VALUES (CAST(? AS udt)...) ON CONFLICT (pk) DO UPDATE SET col = EXCLUDED.col...`. Automatically preserves shadow table newly added columns with database defaults.
+  - `UPDATE`: Executes `UPDATE shadow SET col = CAST(? AS udt)... WHERE pk = ?`. If 0 rows affected (because row has not yet been copied by BackfillWorker), immediately falls back to an idempotent UPSERT, ensuring live updates are never dropped.
+  - `DELETE`: Replays as `DELETE FROM shadow WHERE pk = CAST(? AS pk_udt)`.
+  - Checkpoints `last_applied_lsn` to Redis (`StateStore.checkpointAppliedLsn`) and tracks metrics (`totalApplied`, `inserts`, `updates`, `deletes`).
+- **Load Generator Customization (`LoadGenerator.java`)**:
+  - Parameterized table name support allowing tests to target dynamically created, isolated tables.
+- **Unit & Integration Verification**:
+  - `ChangeApplierTest.java`: Verified `INSERT`, `UPDATE`, `DELETE`, and fallback UPSERT with default value preservation (2/2 tests pass).
+  - `ConcurrencyConvergenceIntegrationTest.java`: Flagship closed-loop test running continuous live writes (50+ ops/sec) while `BackfillWorker` and `ChangeApplier` run simultaneously. Verified **100% row-by-row consistency** (224/224 matching rows, 0 errors, 0 missing rows, 0 data drift).
+
 ---
 
 ## 🛠️ Part 2: How We Did That (Engineering Highlights & Solutions)
@@ -71,6 +105,9 @@ SafeMigrate eliminates exclusive table locks during production schema changes (`
 | **Logback Version Mismatch** | `logback-classic:1.5.3` clashed with `logback-core:1.4.14` from Spring Boot, causing `NoClassDefFoundError: StringUtil`. Aligned both dependencies to `1.4.14` in the parent POM. |
 | **Replication Stream Socket Blocking** | `stream.readPending()` only read local in-memory buffers and didn't wait for incoming network packets. Replaced with `stream.read()` inside a Virtual Thread to park cleanly until Postgres pushes WAL packets. |
 | **Kafka Test Isolation** | Successive test runs on the same topic caused consumer group offset bleed. Replaced static topic names with dynamically generated table/slot names per test run (`orders_pipe_<timestamp>`) for 100% isolated, repeatable test execution. |
+| **Backfill vs. Live Write Race Condition** | Resolved via `INSERT ON CONFLICT (id) DO NOTHING` in Backfill Worker paired with `DO UPDATE SET` in Change Applier. If a live WAL write lands before backfill reaches that row, backfill preserves the live update. |
+| **PostgreSQL JDBC Type Inference Mismatch** | Binding string literals from WAL decoding to typed columns (`bigint`, `numeric`, `timestamp`) throws PSQLException without explicit casting. Solved by introspecting `udt_name` on startup and generating parameter casts: `CAST(? AS <udt_name>)`. |
+| **Out-of-Order Live Updates Before Backfill** | If an `UPDATE` event arrives for a row that hasn't been backfilled yet, `UPDATE` affects 0 rows. Solved by falling back to UPSERT (`INSERT ON CONFLICT DO UPDATE`), guaranteeing the row exists with the latest live state when backfill later arrives with `DO NOTHING`. |
 
 ---
 
@@ -80,10 +117,10 @@ SafeMigrate eliminates exclusive table locks during production schema changes (`
 [ Phase 0: Setup ] ────► [ Phase 1: WAL Reader ] ────► [ Phase 2: Kafka Stream ] (COMPLETED)
                                                                  │
                                                                  ▼
-[ Phase 3: Backfill Engine ] ─────────────────────────► [ Phase 4: Change Applier & Race Resolver ]
+[ Phase 3: Backfill Engine (COMPLETED) ] ─────────────► [ Phase 4: Change Applier (COMPLETED) ]
             │                                                                │
             ▼                                                                ▼
-[ Phase 5: Atomic Cutover & Rollback ] ───────────────► [ Phase 6: Crash-Safe Checkpointing ]
+[ Phase 5: Atomic Cutover & Rollback (NEXT) ] ───────► [ Phase 6: Crash-Safe Checkpointing ]
             │                                                                │
             ▼                                                                ▼
 [ Phase 7: Pre-Flight Safety Checks ] ────────────────► [ Phase 8: Spring Boot Control Plane API ]
@@ -92,18 +129,19 @@ SafeMigrate eliminates exclusive table locks during production schema changes (`
 [ Phase 9: Dashboard UI (Next.js) ] ──────────────────► [ Phase 10: Kubernetes Orchestration ]
 ```
 
-### 1. Phase 3: Backfill Engine (Next Step)
-- **Shadow Table DDL Generator**: Inspects source table schema and generates the shadow table DDL (`<table_name>__shadow`) with the requested changes (new column, new index).
-- **Batched PK Range Copier**: Copies existing rows in primary-key ranges (`WHERE id > ? ORDER BY id ASC LIMIT ?`).
-- **Throttling Mechanism**: Configurable delay between batches to protect live database CPU and disk I/O.
-- **Redis Checkpointing**: Continuously checkpoints `last_copied_id` and backfilled row count in Redis.
-
-### 2. Phase 4: Change Applier & Ordering Correctness
-- **Kafka Consumer to Shadow Table**: Replays `INSERT`, `UPDATE`, and `DELETE` events onto the shadow table.
-- **Race Condition Resolution (Backfill vs. Live Writes)**:
-  - Backfill uses `INSERT INTO shadow ... ON CONFLICT (id) DO NOTHING` so historical backfills never overwrite a newer live WAL update that already landed.
-  - WAL events replay in strict LSN chronological order.
-- **Convergence Verification**: Mathematical verification that `shadow_table` matches `source_table` under continuous mixed concurrent writes.
+### 1. Phase 5: Atomic Cutover Coordinator & Rollback (Next Step)
+- **Lag Catch-up Monitor**: Monitors replication lag and waits until backfill is complete and Kafka lag drops to zero.
+- **Atomic Table Swap**: Executes table rename inside a single transaction with lock timeout protection:
+  ```sql
+  BEGIN;
+    SET LOCAL lock_timeout = '2s';
+    LOCK TABLE orders IN ACCESS EXCLUSIVE MODE;
+    ALTER TABLE orders RENAME TO orders__old;
+    ALTER TABLE orders__shadow RENAME TO orders;
+  COMMIT;
+  ```
+  Swap duration: single-digit milliseconds.
+- **Rollback Engine**: Clean abortion mechanism reverting to the original table if cutover is cancelled or fails.
 
 ### 3. Phase 5: Atomic Cutover & Rollback
 - **Lag Catch-up**: Waits until backfill is complete and Kafka replication lag drops to zero.
