@@ -7,8 +7,8 @@ interface MetricsStripProps {
 }
 
 export default function MetricsStrip({
-  activeCount = 2,
-  completedCount = 148,
+  activeCount = 0,
+  completedCount = 0,
   failedCount = 0,
 }: MetricsStripProps) {
   return (
@@ -25,7 +25,9 @@ export default function MetricsStrip({
           <span className="text-3xl font-semibold text-on-surface leading-none font-mono-numbers">
             {activeCount}
           </span>
-          <span className="text-xs text-on-surface-variant">1 backfilling · 1 ready to cut over</span>
+          <span className="text-xs text-on-surface-variant">
+            {activeCount === 0 ? 'Cluster idle · ready for schema change' : `${activeCount} live in progress`}
+          </span>
         </div>
       </div>
 

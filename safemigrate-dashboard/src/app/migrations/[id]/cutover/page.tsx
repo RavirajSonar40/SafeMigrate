@@ -3,7 +3,6 @@
 import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { MOCK_MIGRATIONS } from '@/lib/mockData';
 import { fetchMigration, executeCutover, rollbackMigration } from '@/lib/api';
 import { MigrationResponse } from '@/lib/types';
 
@@ -16,9 +15,18 @@ export default function CutoverPage({ params }: CutoverPageProps) {
   const router = useRouter();
   const migrationId = resolvedParams.id;
 
-  const fallback =
-    MOCK_MIGRATIONS.find((m) => m.id === migrationId) || MOCK_MIGRATIONS[1];
-  const [migration, setMigration] = useState<MigrationResponse>(fallback);
+  const [migration, setMigration] = useState<MigrationResponse>({
+    id: migrationId,
+    tableName: 'orders',
+    shadowTableName: 'orders__shadow',
+    state: 'READY_CUTOVER',
+    totalSourceRows: 1466,
+    rowsBackfilled: 1466,
+    progressPercentage: 100.0,
+    replicationLagBytes: 0,
+    database: 'production-db-us-east',
+    createdAt: new Date().toISOString()
+  });
 
   useEffect(() => {
     let isMounted = true;

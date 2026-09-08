@@ -36,6 +36,8 @@ export default function OverviewPage() {
   const activeMigrations = migrations.filter(
     (m) => m.state === 'BACKFILLING' || m.state === 'READY_FOR_CUTOVER' || m.state === 'READY_CUTOVER' || m.state === 'INITIALIZING'
   );
+  const completedMigrations = migrations.filter((m) => m.state === 'COMPLETED');
+  const failedMigrations = migrations.filter((m) => m.state === 'ROLLED_BACK' || m.state === 'FAILED');
 
   return (
     <div className="flex flex-col w-full max-w-6xl mx-auto py-8 gap-8">
@@ -73,7 +75,11 @@ export default function OverviewPage() {
       </header>
 
       {/* 4 Elevated KPIs */}
-      <MetricsStrip activeCount={activeMigrations.length} />
+      <MetricsStrip 
+        activeCount={activeMigrations.length} 
+        completedCount={completedMigrations.length} 
+        failedCount={failedMigrations.length} 
+      />
 
       {/* Active Migrations Section */}
       <section className="flex flex-col gap-4">

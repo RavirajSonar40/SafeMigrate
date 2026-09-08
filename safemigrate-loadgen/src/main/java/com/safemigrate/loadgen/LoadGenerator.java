@@ -240,6 +240,10 @@ public class LoadGenerator {
     }
 
     // Getters for testing assertions
+    public long getTotalRequests() { return totalRequests.get(); }
     public long getSuccessRequests() { return successRequests.get(); }
     public long getErrorRequests() { return errorRequests.get(); }
+    public long getInsertCount() { return insertCount.get(); }
+    public long getUpdateCount() { return updateCount.get(); }
+    public long getDeleteCount() { return deleteCount.get(); }
 }

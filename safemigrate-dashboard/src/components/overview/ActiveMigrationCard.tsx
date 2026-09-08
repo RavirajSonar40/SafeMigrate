@@ -13,15 +13,16 @@ export default function ActiveMigrationCard({ migration }: ActiveMigrationCardPr
   const isCompleted = migration.state === 'COMPLETED';
 
   const totalRows = migration.totalSourceRows || migration.sourceRowCount || 1466;
+  const backfilled = migration.rowsBackfilled ?? 0;
   const progressPercent = migration.progressPercentage !== undefined
     ? migration.progressPercentage
     : totalRows > 0
-    ? Math.min(100, (migration.rowsBackfilled / totalRows) * 100)
+    ? Math.min(100, (backfilled / totalRows) * 100)
     : 100;
 
   const rowsFormatted = totalRows >= 1000000
-    ? `${(migration.rowsBackfilled / 1000000).toFixed(1)}M / ${(totalRows / 1000000).toFixed(1)}M`
-    : `${migration.rowsBackfilled.toLocaleString()} / ${totalRows.toLocaleString()} rows`;
+    ? `${(backfilled / 1000000).toFixed(1)}M / ${(totalRows / 1000000).toFixed(1)}M`
+    : `${backfilled.toLocaleString()} / ${totalRows.toLocaleString()} rows`;
 
   return (
     <div className="p-6 rounded-2xl bg-surface-container-lowest hover:bg-surface-container-low transition-all shadow-md flex flex-col justify-between gap-6 border border-outline-variant/15">

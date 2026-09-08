@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
-import { MOCK_MIGRATIONS, MOCK_EVENTS, MOCK_LOGS } from '@/lib/mockData';
+import { MOCK_EVENTS, MOCK_LOGS } from '@/lib/mockData';
 import { useMigrationStream } from '@/lib/sse';
 import { fetchMigration, rollbackMigration } from '@/lib/api';
 import { MigrationResponse } from '@/lib/types';
@@ -16,19 +16,18 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
   const resolvedParams = use(params);
   const migrationId = resolvedParams.id;
 
-  const [realMigration, setRealMigration] = useState<MigrationResponse>(
-    () => MOCK_MIGRATIONS.find((m) => m.id === migrationId) || {
-      ...MOCK_MIGRATIONS[0],
-      id: migrationId,
-      tableName: 'orders',
-      shadowTableName: 'orders__shadow',
-      state: 'READY_CUTOVER',
-      totalSourceRows: 1466,
-      rowsBackfilled: 1466,
-      progressPercentage: 100.0,
-      replicationLagBytes: 0,
-    }
-  );
+  const [realMigration, setRealMigration] = useState<MigrationResponse>({
+    id: migrationId,
+    tableName: 'orders',
+    shadowTableName: 'orders__shadow',
+    state: 'READY_CUTOVER',
+    totalSourceRows: 1466,
+    rowsBackfilled: 1466,
+    progressPercentage: 100.0,
+    replicationLagBytes: 0,
+    database: 'production-db-us-east',
+    createdAt: new Date().toISOString()
+  });
 
   useEffect(() => {
     fetchMigration(migrationId).then((data) => {
@@ -46,7 +45,7 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
   const totalRows = migration.totalSourceRows || migration.sourceRowCount || 1466;
   const progressPercent =
     totalRows > 0
-      ? Math.min(100, (migration.rowsBackfilled / totalRows) * 100)
+      ? Math.min(100, ((migration.rowsBackfilled ?? 0) / totalRows) * 100)
       : 100;
 
   const isReady = migration.state === 'READY_FOR_CUTOVER' || migration.state === 'READY_CUTOVER';
@@ -333,7 +332,7 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
           <div className="my-2">
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold font-mono-numbers text-primary tracking-tight">
-                {Math.round(migration.replicationLagBytes / 1000)}
+                {Math.round((migration.replicationLagBytes ?? 0) / 1000)}
               </span>
               <span className="text-xs font-mono text-on-surface-variant">ms</span>
             </div>

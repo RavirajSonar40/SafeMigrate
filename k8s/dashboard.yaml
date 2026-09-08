@@ -51,6 +51,8 @@ spec:
               value: "0.0.0.0"
             - name: NEXT_PUBLIC_API_URL
               value: "/api/migrations"
+            - name: INTERNAL_BACKEND_URL
+              value: "http://safemigrate-server:8080/api/migrations"
           readinessProbe:
             httpGet:
               path: /overview

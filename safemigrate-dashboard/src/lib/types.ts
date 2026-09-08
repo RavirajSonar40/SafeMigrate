@@ -24,6 +24,11 @@ export interface PreflightReport {
   estimatedRows?: number;
   tableSizeBytes?: number;
   activeLocksDetected?: number;
+  primaryKeyColumn?: string;
+  replicaIdentityFull?: boolean;
+  estimatedRequiredDiskBytes?: number;
+  availableDiskBytes?: number;
+  activeLockContention?: boolean;
   warnings?: string[];
   errors?: string[];
 }
@@ -32,18 +37,22 @@ export interface MigrationResponse {
   id: string;
   tableName: string;
   shadowTableName: string;
-  ddlStatement: string;
+  ddlStatement?: string;
   state: MigrationState;
   totalSourceRows?: number;
   sourceRowCount?: number;
-  rowsBackfilled: number;
+  rowsBackfilled?: number;
   progressPercentage?: number;
-  replicationLagBytes: number;
+  replicationLagBytes?: number;
+  cutoverDurationMs?: number;
   createdAt: string;
   startedAt?: string;
   completedAt?: string;
   initiatedBy?: string;
   database?: string;
+  approved?: boolean;
+  approvedBy?: string;
+  approvedAt?: string;
   preflightReport?: PreflightReport;
   errorMessage?: string;
 }
@@ -58,7 +67,8 @@ export interface CreateMigrationRequest {
 }
 
 export interface ApprovalRequest {
-  approvedBy: string;
+  approver?: string;
+  approvedBy?: string;
   notes?: string;
 }
 

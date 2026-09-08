@@ -4,9 +4,10 @@ import {
   PreflightReport, 
   ApprovalRequest 
 } from './types';
-import { MOCK_MIGRATIONS, MOCK_PREFLIGHT_REPORT } from './mockData';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/migrations';
+const API_BASE_URL = typeof window !== 'undefined' 
+  ? '/api/migrations' 
+  : (process.env.INTERNAL_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/migrations');
 
 export async function fetchMigrations(): Promise<MigrationResponse[]> {
   try {
@@ -16,17 +17,14 @@ export async function fetchMigrations(): Promise<MigrationResponse[]> {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) {
-      return data;
-    }
-    return data;
+    return Array.isArray(data) ? data : [];
   } catch (err) {
     console.warn('Could not fetch real migrations from Spring Boot API:', err);
-    return MOCK_MIGRATIONS;
+    return [];
   }
 }
 
-export async function fetchMigration(id: string): Promise<MigrationResponse> {
+export async function fetchMigration(id: string): Promise<MigrationResponse | null> {
   try {
     const res = await fetch(`${API_BASE_URL}/${id}`, {
       cache: 'no-store',
@@ -34,115 +32,77 @@ export async function fetchMigration(id: string): Promise<MigrationResponse> {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json();
-  } catch {
-    const found = MOCK_MIGRATIONS.find(m => m.id === id);
-    if (found) return found;
-    return {
-      ...MOCK_MIGRATIONS[0],
-      id
-    };
+  } catch (err) {
+    console.warn(`Could not fetch migration ${id} from API:`, err);
+    return null;
   }
 }
 
 export async function submitMigration(request: CreateMigrationRequest): Promise<MigrationResponse> {
   const cleanTable = request.tableName.replace(/^public\./, '').trim();
-  try {
-    const res = await fetch(`${API_BASE_URL}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...request,
-        tableName: cleanTable
-      })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
-      throw new Error(err.message || `HTTP ${res.status}`);
-    }
-    return await res.json();
-  } catch (e) {
-    console.error('submitMigration failed on live backend, falling back:', e);
-    const newId = `mig_${Date.now()}_local`;
-    return {
-      id: newId,
-      tableName: cleanTable,
-      shadowTableName: `${cleanTable}__shadow`,
-      ddlStatement: request.ddlStatement,
-      state: 'BACKFILLING',
-      totalSourceRows: 1466,
-      rowsBackfilled: 500,
-      progressPercentage: 34.1,
-      replicationLagBytes: 0,
-      createdAt: new Date().toISOString(),
-      startedAt: new Date().toISOString(),
-      database: 'production-db-us-east',
-      initiatedBy: 'sara.chen@enterprise.internal',
-    };
+  const res = await fetch(`${API_BASE_URL}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...request,
+      tableName: cleanTable
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || `Failed to submit migration (HTTP ${res.status})`);
   }
+  return await res.json();
 }
 
 export async function runPreflight(tableName: string, ddlStatement: string): Promise<PreflightReport> {
   const cleanTable = tableName.replace(/^public\./, '').trim();
-  try {
-    const res = await fetch(`${API_BASE_URL}/preflight`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tableName: cleanTable, ddlStatement })
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch {
-    return {
-      ...MOCK_PREFLIGHT_REPORT,
-      tableName: cleanTable,
-      passed: true
-    };
+  const res = await fetch(`${API_BASE_URL}/preflight`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tableName: cleanTable, ddlStatement })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || `Pre-flight safety check failed (HTTP ${res.status})`);
   }
+  return await res.json();
 }
 
 export async function approveMigration(id: string, request: ApprovalRequest): Promise<MigrationResponse> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/${id}/approve?approver=${encodeURIComponent(request.approvedBy)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request)
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch {
-    const m = await fetchMigration(id);
-    return { ...m, state: 'READY_CUTOVER' };
+  const approver = request.approver || request.approvedBy || 'dba@enterprise.internal';
+  const res = await fetch(`${API_BASE_URL}/${id}/approve?approver=${encodeURIComponent(approver)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ approver, notes: request.notes })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || `Approval failed (HTTP ${res.status})`);
   }
+  return await res.json();
 }
 
 export async function executeCutover(id: string): Promise<MigrationResponse> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/${id}/cutover`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch {
-    const m = await fetchMigration(id);
-    return { 
-      ...m, 
-      state: 'COMPLETED',
-      completedAt: new Date().toISOString()
-    };
+  const res = await fetch(`${API_BASE_URL}/${id}/cutover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || `Cutover execution failed (HTTP ${res.status})`);
   }
+  return await res.json();
 }
 
 export async function rollbackMigration(id: string, reason: string): Promise<MigrationResponse> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/${id}/rollback?reason=${encodeURIComponent(reason)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } catch {
-    const m = await fetchMigration(id);
-    return { ...m, state: 'ROLLED_BACK' };
+  const res = await fetch(`${API_BASE_URL}/${id}/rollback?reason=${encodeURIComponent(reason)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || `Rollback failed (HTTP ${res.status})`);
   }
+  return await res.json();
 }
