@@ -87,8 +87,16 @@ jobs:
           key: ${{ secrets.AWS_SSH_KEY }}
           script: |
             cd ~/SafeMigrate
-            git pull origin main
-            docker compose up -d --build
+            echo "==================================================" | tee -a deploy.log
+            echo "🚀 [DEPLOY TRIGGERED] $(date -u)" | tee -a deploy.log
+            echo "Pre-deploy commit: $(git rev-parse --short HEAD)" | tee -a deploy.log
+            git pull origin main | tee -a deploy.log
+            echo "Deployed commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%B | head -n 1)" | tee -a deploy.log
+            echo "🔄 Rebuilding Docker Compose fleet..." | tee -a deploy.log
+            docker compose up -d --build | tee -a deploy.log
+            echo "✅ Deployment finished successfully at $(date -u)" | tee -a deploy.log
+            docker compose ps | tee -a deploy.log
+            echo "==================================================" | tee -a deploy.log
 
   deploy-oracle:
     name: Deploy to Oracle Cloud
@@ -142,5 +150,13 @@ jobs:
           key: ${{ secrets.ORACLE_SSH_KEY }}
           script: |
             cd ~/SafeMigrate
-            git pull origin main
-            docker compose up -d --build
+            echo "==================================================" | tee -a deploy.log
+            echo "🚀 [ORACLE DEPLOY TRIGGERED] $(date -u)" | tee -a deploy.log
+            echo "Pre-deploy commit: $(git rev-parse --short HEAD)" | tee -a deploy.log
+            git pull origin main | tee -a deploy.log
+            echo "Deployed commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%B | head -n 1)" | tee -a deploy.log
+            echo "🔄 Rebuilding Docker Compose fleet on Oracle..." | tee -a deploy.log
+            docker compose up -d --build | tee -a deploy.log
+            echo "✅ Deployment finished successfully at $(date -u)" | tee -a deploy.log
+            docker compose ps | tee -a deploy.log
+            echo "==================================================" | tee -a deploy.log
