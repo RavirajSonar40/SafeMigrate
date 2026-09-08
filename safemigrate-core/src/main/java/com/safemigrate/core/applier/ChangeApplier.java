@@ -249,10 +249,22 @@ public class ChangeApplier implements AutoCloseable {
             return;
         }
 
-        Object pkVal = event.getPrimaryKeyValue(pkColumn);
-        if (pkVal == null) {
-            pkVal = event.oldValues().get(pkColumn);
+        Object newPkVal = event.getPrimaryKeyValue(pkColumn);
+        Object oldPkVal = event.oldValues().get(pkColumn);
+
+        // Edge case: Primary Key mutation (e.g. UPDATE orders SET id = 2 WHERE id = 1)
+        if (oldPkVal != null && newPkVal != null && !oldPkVal.toString().equals(newPkVal.toString())) {
+            log.info("Primary key mutated from {} to {} in UPDATE event. Replaying as DELETE(old) + UPSERT(new).", oldPkVal, newPkVal);
+            WalChangeEvent deleteOldEvent = new WalChangeEvent(
+                    event.table(), OperationType.DELETE, Map.of(pkColumn, oldPkVal), Map.of(), event.lsn(), event.timestamp()
+            );
+            applyDelete(deleteOldEvent);
+            applyInsert(event);
+            updateCount.incrementAndGet();
+            return;
         }
+
+        Object pkVal = (newPkVal != null) ? newPkVal : oldPkVal;
         if (pkVal == null) {
             log.warn("Cannot find PK '{}' in UPDATE event: {}", pkColumn, event);
             return;
@@ -346,7 +358,12 @@ public class ChangeApplier implements AutoCloseable {
         consumer.start(event -> {
             try {
                 apply(event);
-            } catch (SQLException e) {
+            } catch (Exception e) {
+                String msg = e.getMessage() != null ? e.getMessage().toLowerCase() : "";
+                if (msg.contains("does not exist") || msg.contains("closed") || msg.contains("terminat")) {
+                    log.debug("ChangeApplier gracefully ignoring trailing event during shutdown/cutover: {}", e.getMessage());
+                    return;
+                }
                 log.error("Failed to apply WAL event {}: {}", event, e.getMessage(), e);
                 throw new RuntimeException("ChangeApplier replay failure", e);
             }

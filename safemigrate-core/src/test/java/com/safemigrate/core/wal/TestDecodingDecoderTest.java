@@ -75,4 +75,18 @@ class TestDecodingDecoderTest {
         ByteBuffer commitBuffer = ByteBuffer.wrap(commitMsg.getBytes(StandardCharsets.UTF_8));
         assertThat(decoder.decode(commitBuffer, 101L)).isEmpty();
     }
+
+    @Test
+    void shouldDecodeStringWithEscapedSingleQuotes() {
+        String msg = "table public.customers: INSERT: id[bigint]:42 name[character varying]:'O''Connor & Sons' notes[text]:'He said ''Hello'' and left'";
+        ByteBuffer buffer = ByteBuffer.wrap(msg.getBytes(StandardCharsets.UTF_8));
+
+        Optional<WalChangeEvent> result = decoder.decode(buffer, 200L);
+        assertThat(result).isPresent();
+        WalChangeEvent event = result.get();
+        assertThat(event.newValues())
+                .containsEntry("id", "42")
+                .containsEntry("name", "O'Connor & Sons")
+                .containsEntry("notes", "He said 'Hello' and left");
+    }
 }

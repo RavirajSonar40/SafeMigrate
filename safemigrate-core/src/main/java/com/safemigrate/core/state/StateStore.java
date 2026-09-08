@@ -55,6 +55,27 @@ public class StateStore implements AutoCloseable {
         }
     }
 
+    /**
+     * Checks whether an exclusive distributed lock is currently held on the given table.
+     */
+    public boolean isTableLocked(String tableName) {
+        String lockKey = "safemigrate:lock:table:" + tableName.toLowerCase();
+        RLock lock = redisson.getLock(lockKey);
+        return lock.isLocked();
+    }
+
+    /**
+     * Forcefully unlocks the table lock (used during recovery or failover).
+     */
+    public void forceReleaseTableLock(String tableName) {
+        String lockKey = "safemigrate:lock:table:" + tableName.toLowerCase();
+        RLock lock = redisson.getLock(lockKey);
+        if (lock.isLocked()) {
+            lock.forceUnlock();
+            log.info("Forcefully released table lock: {}", lockKey);
+        }
+    }
+
     // --- State & Status Management ---
 
     public void setStatus(String migrationId, MigrationState state) {

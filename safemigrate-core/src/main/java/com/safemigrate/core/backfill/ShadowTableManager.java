@@ -99,7 +99,16 @@ public class ShadowTableManager {
 
             // 3. Apply the requested schema alteration to the shadow table
             if (targetAlterDdl != null && !targetAlterDdl.isBlank()) {
-                String fullAlterSql = "ALTER TABLE " + shadowTable + " " + targetAlterDdl + ";";
+                String ddl = targetAlterDdl.trim();
+                if (ddl.endsWith(";")) {
+                    ddl = ddl.substring(0, ddl.length() - 1).trim();
+                }
+                String fullAlterSql;
+                if (ddl.toUpperCase().startsWith("ALTER TABLE")) {
+                    fullAlterSql = ddl.replaceFirst("(?i)ALTER\\s+TABLE\\s+([\"'a-zA-Z0-9_]+)", "ALTER TABLE " + shadowTable) + ";";
+                } else {
+                    fullAlterSql = "ALTER TABLE " + shadowTable + " " + ddl + ";";
+                }
                 log.info("Applying target schema change: {}", fullAlterSql);
                 stmt.execute(fullAlterSql);
             }

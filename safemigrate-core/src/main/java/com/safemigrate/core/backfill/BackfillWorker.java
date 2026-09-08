@@ -30,6 +30,16 @@ public class BackfillWorker implements AutoCloseable {
     private final int batchSize;
     private final long throttleDelayMs;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private volatile BatchProgressListener progressListener;
+
+    @FunctionalInterface
+    public interface BatchProgressListener {
+        void onBatchCompleted(long lastPk, long totalRowsCopied);
+    }
+
+    public void setProgressListener(BatchProgressListener listener) {
+        this.progressListener = listener;
+    }
 
     public BackfillWorker(Connection connection,
                           StateStore stateStore,
@@ -113,6 +123,10 @@ public class BackfillWorker implements AutoCloseable {
                 log.info("Backfilled batch of {} rows (Total: {} | Last PK: {})",
                         batchRows, totalRowsCopied, currentPk);
 
+                if (progressListener != null) {
+                    progressListener.onBatchCompleted(currentPk, totalRowsCopied);
+                }
+
                 // Throttling to prevent spiking DB CPU or IOPS
                 if (throttleDelayMs > 0) {
                     Thread.sleep(throttleDelayMs);
@@ -140,6 +154,10 @@ public class BackfillWorker implements AutoCloseable {
         // ON CONFLICT DO NOTHING: guarantees historical backfill NEVER overwrites live WAL writes!
         return String.format("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (%s) DO NOTHING",
                 shadowTable, cols, placeholders, pkColumn);
+    }
+
+    public long getRowsBackfilled() {
+        return stateStore.getRowsBackfilled(migrationId);
     }
 
     public void stop() {

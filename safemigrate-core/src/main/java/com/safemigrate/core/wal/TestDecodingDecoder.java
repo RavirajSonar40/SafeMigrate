@@ -26,7 +26,7 @@ public class TestDecodingDecoder implements WalMessageDecoder {
     private static final Logger log = LoggerFactory.getLogger(TestDecodingDecoder.class);
 
     private static final Pattern TABLE_PATTERN = Pattern.compile("^table\\s+(?:([\\w]+)\\.)?([\\w]+):\\s+(INSERT|UPDATE|DELETE):\\s*(.*)$");
-    private static final Pattern COLUMN_PATTERN = Pattern.compile("([\\w]+)\\[[^\\]]+\\]:(null|'[^']*'|[^\\s]+)");
+    private static final Pattern COLUMN_PATTERN = Pattern.compile("([\\w]+)\\[[^\\]]+\\]:(null|'(?:''|[^'])*'|[^\\s]+)");
 
     @Override
     public Optional<WalChangeEvent> decode(ByteBuffer buffer, long lsn) {
@@ -91,7 +91,7 @@ public class TestDecodingDecoder implements WalMessageDecoder {
             if ("null".equalsIgnoreCase(rawVal)) {
                 parsedVal = null;
             } else if (rawVal.startsWith("'") && rawVal.endsWith("'") && rawVal.length() >= 2) {
-                parsedVal = rawVal.substring(1, rawVal.length() - 1);
+                parsedVal = rawVal.substring(1, rawVal.length() - 1).replace("''", "'");
             } else {
                 parsedVal = rawVal;
             }

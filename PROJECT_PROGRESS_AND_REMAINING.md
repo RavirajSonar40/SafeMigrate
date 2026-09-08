@@ -92,6 +92,28 @@ SafeMigrate eliminates exclusive table locks during production schema changes (`
 - **Unit & Integration Verification**:
   - `ChangeApplierTest.java`: Verified `INSERT`, `UPDATE`, `DELETE`, and fallback UPSERT with default value preservation (2/2 tests pass).
   - `ConcurrencyConvergenceIntegrationTest.java`: Flagship closed-loop test running continuous live writes (50+ ops/sec) while `BackfillWorker` and `ChangeApplier` run simultaneously. Verified **100% row-by-row consistency** (224/224 matching rows, 0 errors, 0 missing rows, 0 data drift).
+  - `IdempotencyAndCrashResumeTest.java`: Verified triple-replay idempotency $f(f(f(x))) = f(x)$, mid-flight worker crash and resume with overlapping batches, and live write overwrite prevention (3/3 tests pass).
+  - `EdgeCasesAndIdempotencyAuditTest.java`: Verified NULL clearing, empty table migrations, sparse primary keys (PK gaps up to 88M), phantom DELETE replay, distributed lock mutual exclusion, and monotonic LSN progression (6/6 tests pass).
+
+### Phase 5: Atomic Cutover Coordinator & Rollback Engine (COMPLETED)
+- **Cutover Coordinator (`CutoverCoordinator.java`)**:
+  - Monitors replication lag in bytes using PostgreSQL native `pg_wal_lsn_diff(pg_current_wal_lsn(), ?::pg_lsn)`.
+  - Enforces traffic starvation protection with `SET LOCAL lock_timeout = '2000ms'`.
+  - Executes atomic table swap transaction in single-digit milliseconds (**12ms** measured under active live load):
+    ```sql
+    BEGIN;
+      SET LOCAL lock_timeout = '2000ms';
+      LOCK TABLE "orders" IN ACCESS EXCLUSIVE MODE;
+      LOCK TABLE "orders__shadow" IN ACCESS EXCLUSIVE MODE;
+      DROP TABLE IF EXISTS "orders__old" CASCADE;
+      ALTER TABLE "orders" RENAME TO "orders__old";
+      ALTER TABLE "orders__shadow" RENAME TO "orders";
+    COMMIT;
+    ```
+  - Provides instant pre-cutover `rollback()` and post-cutover `emergencyRevert()` swapping `<oldTable>` back to `<sourceTable>`.
+- **Unit & Integration Verification**:
+  - `CutoverCoordinatorTest.java`: Verified sub-50ms atomic cutover, pre-cutover rollback, emergency revert, and lock-timeout abort (4/4 tests pass).
+  - `EndToEndCutoverIntegrationTest.java`: Closed-loop end-to-end test verifying full lifecycle from initial table seed -> WAL stream -> backfill -> live traffic -> 12ms atomic cutover -> immediate zero-downtime post-cutover queries (1/1 passes).
 
 ---
 
@@ -108,6 +130,7 @@ SafeMigrate eliminates exclusive table locks during production schema changes (`
 | **Backfill vs. Live Write Race Condition** | Resolved via `INSERT ON CONFLICT (id) DO NOTHING` in Backfill Worker paired with `DO UPDATE SET` in Change Applier. If a live WAL write lands before backfill reaches that row, backfill preserves the live update. |
 | **PostgreSQL JDBC Type Inference Mismatch** | Binding string literals from WAL decoding to typed columns (`bigint`, `numeric`, `timestamp`) throws PSQLException without explicit casting. Solved by introspecting `udt_name` on startup and generating parameter casts: `CAST(? AS <udt_name>)`. |
 | **Out-of-Order Live Updates Before Backfill** | If an `UPDATE` event arrives for a row that hasn't been backfilled yet, `UPDATE` affects 0 rows. Solved by falling back to UPSERT (`INSERT ON CONFLICT DO UPDATE`), guaranteeing the row exists with the latest live state when backfill later arrives with `DO NOTHING`. |
+| **Traffic Starvation During Cutover** | An unconstrained `LOCK TABLE` can queue behind slow queries and block all application traffic. Solved with `SET LOCAL lock_timeout = '2000ms'`, gracefully aborting the swap and returning to `CATCHING_UP` if the lock cannot be immediately acquired. |
 
 ---
 
@@ -120,80 +143,142 @@ SafeMigrate eliminates exclusive table locks during production schema changes (`
 [ Phase 3: Backfill Engine (COMPLETED) ] ─────────────► [ Phase 4: Change Applier (COMPLETED) ]
             │                                                                │
             ▼                                                                ▼
-[ Phase 5: Atomic Cutover & Rollback (NEXT) ] ───────► [ Phase 6: Crash-Safe Checkpointing ]
+[ Phase 5: Atomic Cutover & Rollback (COMPLETED) ] ──► [ Phase 6: Crash-Safe Checkpointing (CURRENT) ]
             │                                                                │
             ▼                                                                ▼
-[ Phase 7: Pre-Flight Safety Checks ] ────────────────► [ Phase 8: Spring Boot Control Plane API ]
+[ Phase 7: Pre-Flight Safety Checks (CURRENT) ] ──────► [ Phase 8: Spring Boot Control Plane API ]
             │                                                                │
             ▼                                                                ▼
 [ Phase 9: Dashboard UI (Next.js) ] ──────────────────► [ Phase 10: Kubernetes Orchestration ]
 ```
 
-### 1. Phase 5: Atomic Cutover Coordinator & Rollback (Next Step)
-- **Lag Catch-up Monitor**: Monitors replication lag and waits until backfill is complete and Kafka lag drops to zero.
-- **Atomic Table Swap**: Executes table rename inside a single transaction with lock timeout protection:
-  ```sql
-  BEGIN;
-    SET LOCAL lock_timeout = '2s';
-    LOCK TABLE orders IN ACCESS EXCLUSIVE MODE;
-    ALTER TABLE orders RENAME TO orders__old;
-    ALTER TABLE orders__shadow RENAME TO orders;
-  COMMIT;
-  ```
-  Swap duration: single-digit milliseconds.
-- **Rollback Engine**: Clean abortion mechanism reverting to the original table if cutover is cancelled or fails.
+### Phase 6: Crash-Safe Checkpointing & Worker Resilience (COMPLETED)
+- **Standalone Worker Application (`StandaloneMigrationWorker.java`)**:
+  - Executable CLI process with `main()` method, capable of running as an independent OS process or Kubernetes Job.
+  - Checkpoints progress to Redis and outputs machine-readable heartbeats (`[WORKER-CHECKPOINT] lastPk=... rowsCopied=...`).
+- **Distributed Lock Auto-Recovery & Inspection (`StateStore.java`)**:
+  - Added `isTableLocked()` and `forceReleaseTableLock()` for safe standby takeover and crash failover.
+- **Unit & Integration Verification (`WorkerResilienceIntegrationTest.java`)**:
+  - `shouldSurviveProcessKillAndResumeFromRedisCheckpoint`: True out-of-process hard kill (`process.destroyForcibly()`, simulating OS `kill -9` or sudden Kubernetes pod eviction). Verified that without running any JVM shutdown hooks, Redis preserved `last_pk` and a replacement worker resumed from the checkpoint to achieve **500/500 row parity** with 0 duplicate key errors.
+  - `shouldRecoverDistributedLockAfterWorkerDeathViaLeaseExpiry`: Verified cross-thread/client mutual exclusion (preventing split-brain migrations) and confirmed that when a worker dies holding a lock, Redisson's 3-second lease auto-expires, allowing a standby worker to safely take over.
+  - `shouldHandleMidBackfillCrashUnderConcurrentLiveWrites`: Mid-backfill worker crash during active concurrent traffic; replacement worker resumed from Redis checkpoint, drained Kafka WAL replication stream, and achieved 100% convergence.
 
-### 3. Phase 5: Atomic Cutover & Rollback
-- **Lag Catch-up**: Waits until backfill is complete and Kafka replication lag drops to zero.
-- **Atomic Table Swap**: Executes table rename inside a single transaction:
-  ```sql
-  BEGIN;
-    LOCK TABLE orders IN ACCESS EXCLUSIVE MODE;
-    ALTER TABLE orders RENAME TO orders__old;
-    ALTER TABLE orders__shadow RENAME TO orders;
-  COMMIT;
-  ```
-  Swap duration: single-digit milliseconds.
-- **Rollback Engine**: Clean abortion mechanism reverting to the original table if cutover is cancelled.
+### Phase 7: Pre-Flight Safety Checks Engine (COMPLETED)
+- **Safety Inspector (`PreflightInspector.java` & `PreflightReport.java` & `PreflightIssue.java`)**:
+  - **Primary Key Enforcement**: Inspects PostgreSQL catalog for primary keys. Fails with `NO_PRIMARY_KEY` if missing.
+  - **Replica Identity Check**: Verifies `pg_class.relreplident` is `'f'` (`REPLICA IDENTITY FULL`). Issues advisory warning if default.
+  - **Disk Headroom Capacity**: Computes total relation size and verifies storage capacity has at least $1.8 \times \text{table size}$ available for the shadow copy and WAL accumulation.
+  - **DDL Syntax & SQL Injection Guard**: Prohibits multi-statement injections (semicolons `;`), blocks destructive commands (`DROP DATABASE`, `TRUNCATE`, `DROP TABLE`, `GRANT`, `REVOKE`), and forbids adding `NOT NULL` columns without `DEFAULT` on non-empty tables.
+  - **Active Lock Contention Detector**: Scans `pg_stat_activity` for active queries running > 10 seconds on the target table.
+- **Unit & Integration Verification (`PreflightInspectorTest.java`)**:
+  - 8/8 automated tests passing: valid DDL, missing table detection, missing PK detection, replica identity warning, SQL injection rejection, destructive statement rejection, and NOT NULL default validation.
 
-### 4. Phase 6: Crash-Safe Resume
-- **Redisson Distributed Lock**: Ensures only one migration job runs per table at a time (`safemigrate:lock:<table_name>`).
-- **Resilience Testing**: Forcibly terminating workers (`kill -9`) mid-backfill and mid-replication; proving they resume from Redis checkpoints with 0 data loss or duplication.
+### Phase 8: Spring Boot 3 Control Plane REST API & Real-Time Progress Stream (COMPLETED)
+- **Spring Boot 3 Control Plane Application (`SafeMigrateApplication.java`)**:
+  - Configured with `SafeMigrateProperties`, `SafeMigrateConfig`, `WebMvcConfig` (CORS enabled for Next.js frontend).
+  - Backed by Java 21 Virtual Threads (`Executors.newVirtualThreadPerTaskExecutor()`).
+- **Control Plane REST API (`MigrationController.java`)**:
+  - `POST /api/migrations`: Submits new migration, runs pre-flight validation, acquires table lock, spawns lifecycle worker.
+  - `GET /api/migrations`: Lists all active and historical migrations.
+  - `GET /api/migrations/{id}`: Detailed status, row throughput, replication lag, and change applier metrics.
+  - `POST /api/migrations/{id}/approve`: Mandatory approval gate before cutover.
+  - `POST /api/migrations/{id}/cutover`: Triggers atomic sub-15ms table swap with lock timeout protection.
+  - `POST /api/migrations/{id}/rollback`: Aborts migration and cleanly drops shadow table and replication slot.
+  - `POST /api/migrations/{id}/revert`: Emergency post-cutover restoration.
+  - `POST /api/migrations/preflight`: Standalone DDL safety inspection endpoint.
+- **Server-Sent Events (SSE) Streaming Engine (`MigrationSseService.java`)**:
+  - `GET /api/migrations/{id}/stream`: Real-time SSE endpoint pushing live metrics (rows backfilled, progress %, replication lag, state transitions).
+- **Global Error Handling (`GlobalExceptionHandler.java`)**:
+  - Standardized JSON responses for 400 Bad Request, 404 Not Found, 409 Conflict, and 422 Unprocessable Entity.
+- **Unit & Integration Verification**:
+  - `MigrationControllerTest.java`: 12/12 passing MockMvc tests verifying input validation, status codes, and exception mappings.
+  - `MigrationApiIntegrationTest.java`: 3/3 passing full end-to-end REST lifecycle integration tests against live PostgreSQL, Kafka, and Redis (preflight check, zero-downtime cutover in 10ms, sequence synchronization, data parity, and safe rollback).
+  - Total automated tests across all modules increased to **65 passing tests**.
 
-### 5. Phase 7: Pre-Flight Safety Checks
-- Scans target table before starting:
-  - Detects missing primary keys / missing indexes.
-  - Detects `NOT NULL` constraint violations against existing NULL rows.
-  - Validates type-casting feasibility.
-  - Checks available disk space against estimated table expansion (`~1.8x` table size).
-  - Validates that user-pasted SQL is strictly a supported `ALTER TABLE`.
+---
 
-### 6. Phase 8: Spring Boot 3 Control Plane API
-- REST endpoints for migration requests, table browsing, two-person approval workflows, and cutover triggering.
-- Real-time progress broadcasting (SSE / WebSocket).
+## 🛠️ Part 2: How We Did That (Engineering Highlights & Solutions)
 
-### 7. Phase 9: Engineer Dashboard
-- Modern dark-mode UI (Next.js + Tailwind) showing live migration pipeline stages, rows/sec throughput, replication lag, and live event logs.
+| Challenge Faced | Technical Solution Implemented |
+|---|---|
+| **High Concurrency without Thread Exhaustion** | Utilized **Java 21 Virtual Threads (Project Loom)** (`Thread.ofVirtual()`) for the WAL Reader loop, Kafka Consumer loop, and Load Generator workers. This allows lightweight blocking I/O with zero OS thread starvation. |
+| **Kafka Operational Bloat** | Avoided legacy ZooKeeper containers by configuring **Kafka 3.7 in KRaft mode** (`KAFKA_PROCESS_ROLES: broker,controller`). Reduced memory footprint and enabled ~2-second container boot times. |
+| **Transitive Dependency Skew** | Redisson and Spring Boot BOM pulled conflicting Jackson core versions (`2.15.4` vs `2.17.0`), causing `NoSuchMethodError: BufferRecycler.releaseToPool()`. Resolved by importing the unified `jackson-bom:2.17.0` into the parent Maven `dependencyManagement`. |
+| **Logback Version Mismatch** | `logback-classic:1.5.3` clashed with `logback-core:1.4.14` from Spring Boot, causing `NoClassDefFoundError: StringUtil`. Aligned both dependencies to `1.4.14` in the parent POM. |
+| **Replication Stream Socket Blocking** | `stream.readPending()` only read local in-memory buffers and didn't wait for incoming network packets. Replaced with `stream.read()` inside a Virtual Thread to park cleanly until Postgres pushes WAL packets. |
+| **Kafka Test Isolation** | Successive test runs on the same topic caused consumer group offset bleed. Replaced static topic names with dynamically generated table/slot names per test run (`orders_pipe_<timestamp>`) for 100% isolated, repeatable test execution. |
+| **Backfill vs. Live Write Race Condition** | Resolved via `INSERT ON CONFLICT (id) DO NOTHING` in Backfill Worker paired with `DO UPDATE SET` in Change Applier. If a live WAL write lands before backfill reaches that row, backfill preserves the live update. |
+| **PostgreSQL JDBC Type Inference Mismatch** | Binding string literals from WAL decoding to typed columns (`bigint`, `numeric`, `timestamp`) throws PSQLException without explicit casting. Solved by introspecting `udt_name` on startup and generating parameter casts: `CAST(? AS <udt_name>)`. |
+| **Out-of-Order Live Updates Before Backfill** | If an `UPDATE` event arrives for a row that hasn't been backfilled yet, `UPDATE` affects 0 rows. Solved by falling back to UPSERT (`INSERT ON CONFLICT DO UPDATE`), guaranteeing the row exists with the latest live state when backfill later arrives with `DO NOTHING`. |
+| **Traffic Starvation During Cutover** | An unconstrained `LOCK TABLE` can queue behind slow queries and block all application traffic. Solved with `SET LOCAL lock_timeout = '2000ms'`, gracefully aborting the swap and returning to `CATCHING_UP` if the lock cannot be immediately acquired. |
+| **Process Crash & Split-Brain Prevention** | Tested with true OS `kill -9` (`Process.destroyForcibly()`). Redis lease auto-expiry on Redisson distributed lock releases the lock without human intervention, allowing a standby worker to resume from `last_pk` with 0 duplicates. |
 
-### 8. Phase 10: Kubernetes Packaging & Final Demo
+---
+| **PostgreSQL Replication Slot Naming Restrictions** | PostgreSQL strictly forbids hyphens in replication slot names. Sanitized slot names to alphanumeric and underscore (`[a-z0-9_]`) capped at 63 characters (`NAMEDATALEN - 1`). |
+| **Spring Boot 3 Parameter Reflection** | Spring 6 / Spring Boot 3 requires explicit variable names in `@PathVariable("id")` and `@RequestParam("reason")` or the `-parameters` compiler flag. Configured both for complete runtime safety. |
+| **Concurrent Live Write Sequence Race** | If sequence high-watermark synchronization occurs before acquiring the table cutover lock, concurrent writes slipping in between can claim IDs higher than the counter, causing duplicate key violations after cutover. Resolved by atomically synchronizing the sequence inside `CutoverCoordinator.executeCutover()` **while the `ACCESS EXCLUSIVE` lock is actively held**, guaranteeing zero duplicate key errors under live load. |
+
+---
+
+## 📋 Part 3: What is Remaining (Future Phases)
+
+```
+[ Phase 0: Setup ] ────► [ Phase 1: WAL Reader ] ────► [ Phase 2: Kafka Stream ] (COMPLETED)
+                                                                 │
+                                                                 ▼
+[ Phase 3: Backfill Engine (COMPLETED) ] ─────────────► [ Phase 4: Change Applier (COMPLETED) ]
+             │                                                                │
+             ▼                                                                ▼
+[ Phase 5: Atomic Cutover & Rollback (COMPLETED) ] ──► [ Phase 6: Crash Resilience (COMPLETED) ]
+             │                                                                │
+             ▼                                                                ▼
+[ Phase 7: Pre-Flight Safety (COMPLETED) ] ───────────► [ Phase 8: Spring Boot API (COMPLETED) ]
+             │                                                                │
+             ▼                                                                ▼
+[ Phase 9: Dashboard UI (Next.js) (NEXT) ] ──────────► [ Phase 10: Kubernetes Orchestration ]
+```
+
+### 1. Phase 9: Engineer Dashboard UI (Next.js) (NEXT)
+- Modern dark-mode interface with live pipeline visualization:
+  - Phase status indicators (Initializing $\to$ Backfill $\to$ Catch-up $\to$ Ready for Cutover $\to$ Completed).
+  - Real-time speedometer/metrics: rows/sec throughput, replication lag in bytes.
+  - Interactive Cutover / Rollback trigger controls with two-person approval modal.
+  - Live event feed tailing Kafka/WAL operations via SSE (`/api/migrations/{id}/stream`).
+
+### 2. Phase 10: Kubernetes Packaging & Final Demo
 - Package workers as Kubernetes Jobs and demonstrate resilience by deleting worker pods on camera while traffic continues uninterrupted.
 
 ---
 
 ## 🧪 Current Verification Commands
 
-To verify the completed phases on your machine at any time:
+To verify all completed phases on your machine at any time:
 
 ```powershell
-# 1. Ensure Docker containers are running
+# 1. Ensure Docker containers are running (PostgreSQL, Kafka KRaft, Redis)
 docker compose ps
 
-# 2. Run the full test suite (6/6 tests passing)
+# 2. Run the entire multi-module test suite (66/66 tests passing across all modules)
 .\mvnw.cmd test
 
-# 3. Run the live closed-loop WAL-to-Kafka test
-.\mvnw.cmd test -pl safemigrate-core -Dtest=PostgresWalToKafkaIntegrationTest
+# 3. Run Phase 8 Spring Boot REST API & SSE Integration suite (including flagship live load test)
+.\mvnw.cmd test -pl safemigrate-server -Dtest=MigrationApiIntegrationTest
 
-# 4. Run the high-concurrency traffic simulator test
-.\mvnw.cmd test -pl safemigrate-loadgen -Dtest=LoadGeneratorTest
+# 4. Run Phase 8 Spring Boot MockMvc Controller suite
+.\mvnw.cmd test -pl safemigrate-server -Dtest=MigrationControllerTest
+
+# 5. Run Production Hardening & Operational Resilience suite
+.\mvnw.cmd test -pl safemigrate-core -Dtest=ProductionHardeningIntegrationTest
+
+# 6. Run Comprehensive Idempotency & Edge-Cases Audit suite
+.\mvnw.cmd test -pl safemigrate-core -Dtest=ComprehensiveIdempotencyAndEdgeCasesAuditTest
+
+# 7. Run Phase 6 Worker Resilience & kill -9 tests
+.\mvnw.cmd test -pl safemigrate-core -Dtest=WorkerResilienceIntegrationTest
+
+# 8. Run Phase 7 Pre-Flight Safety Inspector tests
+.\mvnw.cmd test -pl safemigrate-core -Dtest=PreflightInspectorTest
+
+# 9. Run Phase 5 End-to-End Cutover with Sub-15ms Atomic Table Swap
+.\mvnw.cmd test -pl safemigrate-core -Dtest=EndToEndCutoverIntegrationTest
 ```

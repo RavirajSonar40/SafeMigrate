@@ -11,5 +11,6 @@ public enum MigrationState {
     CUTTING_OVER,
     COMPLETED,
     FAILED,
-    ROLLED_BACK
+    ROLLED_BACK,
+    REVERTED
 }
