@@ -406,7 +406,7 @@ export default function Sidebar() {
                   <span>MIGRATION_INITIALIZED: orders</span>
                   <span className="text-outline text-[11px]">Today 17:45 UTC</span>
                 </div>
-                <span className="text-[11px] text-on-surface-variant">Operator: sara.chen@enterprise.internal · DDL validated</span>
+                <span className="text-[11px] text-on-surface-variant">Operator: @RavirajSonar40 · DDL validated</span>
               </div>
               <div className="p-3 rounded-lg bg-surface-container-low border border-outline-variant/10 flex flex-col gap-1">
                 <div className="flex justify-between font-semibold text-on-surface">

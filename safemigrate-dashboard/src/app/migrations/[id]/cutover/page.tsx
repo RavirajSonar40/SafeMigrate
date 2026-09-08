@@ -381,7 +381,7 @@ export default function CutoverPage({ params }: CutoverPageProps) {
                 <span className="material-symbols-outlined text-primary text-[16px]">verified</span>
               </div>
               <div className="font-mono text-[11px] text-on-surface-variant">
-                sara.chen (Staff SRE) • alex.dev (Core Infra)
+                @RavirajSonar40 (Staff DBRE) • Automated Guardrail
               </div>
             </div>
           </div>
