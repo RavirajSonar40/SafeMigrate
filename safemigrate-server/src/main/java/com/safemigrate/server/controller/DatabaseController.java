@@ -12,7 +12,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/databases")
-@CrossOrigin(origins = "*")
 public class DatabaseController {
 
     private final DatabaseService databaseService;
