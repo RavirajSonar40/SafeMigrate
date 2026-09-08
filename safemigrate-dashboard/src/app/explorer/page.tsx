@@ -3,8 +3,6 @@
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import Sidebar from '@/components/layout/Sidebar';
-import Header from '@/components/layout/Header';
 
 interface DatabaseOption {
   id: string;
@@ -119,13 +117,9 @@ function ExplorerContent() {
   );
 
   return (
-    <div className="flex h-screen bg-surface selection:bg-primary/30 overflow-hidden font-sans">
-      <Sidebar />
-      <div className="flex-1 ml-[220px] flex flex-col h-full overflow-hidden">
-        <Header />
-
-        {/* Top Control Bar */}
-        <div className="px-6 py-4 border-b border-outline-variant/15 bg-surface-container-lowest flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+    <div className="flex flex-col h-[calc(100vh-5.5rem)] max-w-full font-sans">
+      {/* Top Control Bar */}
+      <div className="px-6 py-3.5 border border-outline-variant/20 rounded-xl bg-surface-container-lowest flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 shrink-0 shadow-sm">
           <div className="flex items-center gap-3">
             <span className="material-symbols-outlined text-primary text-[24px]">table_chart</span>
             <div>
@@ -233,7 +227,7 @@ function ExplorerContent() {
           </aside>
 
           {/* Right Column: Inside the DB (Schema & Live Data Preview) */}
-          <main className="flex-1 flex flex-col h-full overflow-hidden bg-surface">
+          <div className="flex-1 flex flex-col h-full overflow-hidden bg-surface">
             {selectedTable && currentTableMeta ? (
               <>
                 {/* Table Header Bar */}
@@ -488,10 +482,9 @@ function ExplorerContent() {
                 </p>
               </div>
             )}
-          </main>
+          </div>
         </div>
       </div>
-    </div>
   );
 }
 

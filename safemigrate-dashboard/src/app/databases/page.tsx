@@ -2,8 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import Sidebar from '@/components/layout/Sidebar';
-import Header from '@/components/layout/Header';
 
 interface DatabaseConnection {
   id: string;
@@ -148,13 +146,8 @@ export default function DatabasesPage() {
   };
 
   return (
-    <div className="flex h-screen bg-surface selection:bg-primary/30 overflow-hidden font-sans">
-      <Sidebar />
-      <div className="flex-1 ml-[220px] flex flex-col h-full overflow-y-auto">
-        <Header />
-
-        <main className="p-8 max-w-7xl w-full mx-auto flex flex-col gap-6">
-          {/* Header Bar */}
+    <div className="max-w-7xl w-full mx-auto py-4 flex flex-col gap-6 font-sans">
+      {/* Header Bar */}
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-outline-variant/15 pb-6">
             <div>
               <div className="flex items-center gap-2 mb-1.5">
@@ -282,8 +275,6 @@ export default function DatabasesPage() {
               ))}
             </div>
           )}
-        </main>
-      </div>
 
       {/* Connect Database Modal */}
       {showAddModal && (
