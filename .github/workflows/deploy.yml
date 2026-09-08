@@ -1,0 +1,45 @@
+name: Multi-Cloud CI/CD (AWS + Oracle)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy-aws:
+    name: Deploy to AWS EC2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to AWS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        if: "${{ secrets.AWS_HOST != '' && secrets.AWS_SSH_KEY != '' }}"
+        with:
+          host: ${{ secrets.AWS_HOST }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_KEY }}
+          script: |
+            if [ ! -d "SafeMigrate" ]; then
+              git clone https://github.com/RavirajSonar40/SafeMigrate.git
+            fi
+            cd SafeMigrate
+            git pull origin main
+            docker compose up -d --build
+
+  deploy-oracle:
+    name: Deploy to Oracle Cloud
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Oracle via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        if: "${{ secrets.ORACLE_HOST != '' && secrets.ORACLE_SSH_KEY != '' }}"
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ubuntu
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            if [ ! -d "SafeMigrate" ]; then
+              git clone https://github.com/RavirajSonar40/SafeMigrate.git
+            fi
+            cd SafeMigrate
+            git pull origin main
+            docker compose up -d --build
