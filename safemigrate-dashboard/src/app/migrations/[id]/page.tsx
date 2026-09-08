@@ -30,9 +30,20 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
   });
 
   useEffect(() => {
-    fetchMigration(migrationId).then((data) => {
-      if (data) setRealMigration(data);
-    });
+    let isMounted = true;
+    const load = () => {
+      fetchMigration(migrationId).then((data) => {
+        if (isMounted && data) {
+          setRealMigration(data);
+        }
+      });
+    };
+    load();
+    const interval = setInterval(load, 2500);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [migrationId]);
 
   const { data: migration, isConnected } = useMigrationStream(realMigration);
@@ -105,7 +116,7 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
               </h1>
               <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-surface-container font-mono text-xs text-on-surface-variant border border-outline-variant/20">
                 <span className="material-symbols-outlined text-[14px] text-outline">dns</span>
-                production-db-us-east
+                {migration.databaseId || migration.database || 'supabase-production'}
               </span>
 
               {isAborted ? (
@@ -146,6 +157,16 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
               >
                 <span className="material-symbols-outlined text-[16px]">bolt</span>
                 <span>Review Cutover</span>
+              </Link>
+            )}
+
+            {isCompleted && (
+              <Link
+                href={`/explorer?db=${encodeURIComponent(migration.databaseId || 'supabase-production')}&table=${encodeURIComponent((migration.tableName || 'orders').replace(/^public\./, ''))}&highlight=${encodeURIComponent(migration.ddlStatement?.match(/ADD\s+COLUMN\s+["']?([a-zA-Z0-9_]+)["']?/i)?.[1] || '')}`}
+                className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-primary text-surface-container-lowest font-semibold text-xs hover:bg-primary-fixed transition-colors shadow-sm"
+              >
+                <span className="material-symbols-outlined text-[16px]">table_chart</span>
+                <span>Inspect in DB Explorer</span>
               </Link>
             )}
 
@@ -269,12 +290,12 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
 
           {/* Stage 5: Complete */}
           <div className={`flex items-center gap-3 shrink-0 ${isCompleted ? 'opacity-100' : 'opacity-40'}`}>
-            <div className="w-7 h-7 rounded-full bg-surface-container-high flex items-center justify-center text-outline shrink-0 font-mono text-xs">
-              5
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 font-mono text-xs ${isCompleted ? 'bg-primary text-surface-container-lowest font-bold' : 'bg-surface-container-high text-outline'}`}>
+              {isCompleted ? <span className="material-symbols-outlined text-[16px]">check</span> : '5'}
             </div>
             <div className="flex flex-col min-w-0">
-              <span className="font-mono text-xs font-medium text-on-surface">Complete</span>
-              <span className="font-mono text-[11px] text-outline">Drop original</span>
+              <span className="font-mono text-xs font-medium text-on-surface">5. Complete</span>
+              <span className="font-mono text-[11px] text-outline">{isCompleted ? 'Table Promoted' : 'Drop original'}</span>
             </div>
           </div>
         </div>

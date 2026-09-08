@@ -4,12 +4,14 @@ interface MetricsStripProps {
   activeCount?: number;
   completedCount?: number;
   failedCount?: number;
+  onClearFailed?: () => void;
 }
 
 export default function MetricsStrip({
   activeCount = 0,
   completedCount = 0,
   failedCount = 0,
+  onClearFailed,
 }: MetricsStripProps) {
   return (
     <section aria-label="System Metrics" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -54,9 +56,19 @@ export default function MetricsStrip({
       <div className="p-6 rounded-xl bg-surface-container-low shadow-sm flex flex-col justify-between h-36 border border-outline-variant/10">
         <div className="flex items-center justify-between">
           <span className="text-sm text-on-surface-variant">Failed / Rolled Back</span>
-          <span className="p-1.5 rounded-lg bg-surface-container text-primary">
-            <span className="material-symbols-outlined text-[18px]">check_circle</span>
-          </span>
+          {failedCount > 0 && onClearFailed ? (
+            <button
+              onClick={onClearFailed}
+              title="Clear failed runs"
+              className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-container hover:bg-surface-container-high text-outline hover:text-on-surface transition-colors cursor-pointer border border-outline-variant/30"
+            >
+              Clear
+            </button>
+          ) : (
+            <span className="p-1.5 rounded-lg bg-surface-container text-primary">
+              <span className="material-symbols-outlined text-[18px]">check_circle</span>
+            </span>
+          )}
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-3xl font-semibold text-on-surface leading-none font-mono-numbers">

@@ -30,6 +30,7 @@ public class MigrationResponse {
     private String completedAt;
     private PreflightReport preflightReport;
     private String errorMessage;
+    private String databaseId;
 
     public MigrationResponse() {
     }
@@ -232,5 +233,13 @@ public class MigrationResponse {
 
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
+    }
+
+    public String getDatabaseId() {
+        return databaseId;
+    }
+
+    public void setDatabaseId(String databaseId) {
+        this.databaseId = databaseId;
     }
 }

@@ -202,17 +202,21 @@ public class PreflightInspector {
 
         String ddl = targetDdl.trim();
 
-        // 1. Prohibit multi-statement injection
+        // 1. Validate multi-statements (prohibit injection of arbitrary or destructive commands)
         if (ddl.contains(";")) {
             String[] statements = ddl.split(";");
-            int nonEmpty = 0;
             for (String s : statements) {
-                if (!s.trim().isEmpty()) nonEmpty++;
-            }
-            if (nonEmpty > 1) {
-                issues.add(PreflightIssue.error("SQL_INJECTION_DETECTED",
-                        "Multi-statement execution detected. DDL must contain exactly one schema alteration statement."));
-                return;
+                String clean = s.replaceAll("(?m)^--.*$", "").trim();
+                if (clean.isEmpty()) continue;
+                String upper = clean.toUpperCase();
+                boolean isAllowedDdl = upper.startsWith("ALTER TABLE") 
+                        || upper.startsWith("CREATE INDEX") 
+                        || upper.startsWith("CREATE UNIQUE INDEX");
+                if (!isAllowedDdl || PROHIBITED_SQL.matcher(clean).find()) {
+                    issues.add(PreflightIssue.error("SQL_INJECTION_DETECTED",
+                            "Multi-statement execution detected unauthorized or destructive SQL command: " + clean));
+                    return;
+                }
             }
         }
 

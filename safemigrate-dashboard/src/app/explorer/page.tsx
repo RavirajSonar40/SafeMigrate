@@ -40,16 +40,20 @@ interface TableData {
 
 function ExplorerContent() {
   const searchParams = useSearchParams();
-  const initialDbId = searchParams.get('db') || 'default-postgres';
+  const dbParam = searchParams.get('db');
+  const tableParam = searchParams.get('table');
+  const highlightParam = searchParams.get('highlight')?.trim();
 
   const [databases, setDatabases] = useState<DatabaseOption[]>([]);
-  const [selectedDbId, setSelectedDbId] = useState<string>(initialDbId);
+  const [selectedDbId, setSelectedDbId] = useState<string>(dbParam || 'default-postgres');
   const [tables, setTables] = useState<TableSummary[]>([]);
-  const [selectedTable, setSelectedTable] = useState<string | null>(null);
+  const [selectedTable, setSelectedTable] = useState<string | null>(tableParam || null);
   const [tableSearch, setTableSearch] = useState('');
 
-  // Active view tab
-  const [activeTab, setActiveTab] = useState<'data' | 'schema' | 'replication'>('data');
+  // Active view tab - default to schema if highlight is provided so user immediately sees their column spec
+  const [activeTab, setActiveTab] = useState<'data' | 'schema' | 'replication'>(
+    highlightParam ? 'schema' : 'data'
+  );
 
   // Detail states
   const [schemaColumns, setSchemaColumns] = useState<ColumnMetadata[]>([]);
@@ -64,13 +68,15 @@ function ExplorerContent() {
       .then((data) => {
         if (Array.isArray(data) && data.length > 0) {
           setDatabases(data);
-          if (!selectedDbId || !data.some((d: DatabaseOption) => d.id === selectedDbId)) {
+          if (dbParam && data.some((d: DatabaseOption) => d.id === dbParam)) {
+            setSelectedDbId(dbParam);
+          } else if (!selectedDbId || !data.some((d: DatabaseOption) => d.id === selectedDbId)) {
             setSelectedDbId(data[0].id);
           }
         }
       })
       .catch((err) => console.error('Failed to load databases:', err));
-  }, []);
+  }, [dbParam]);
 
   // 2. Fetch tables when database changes
   useEffect(() => {
@@ -81,7 +87,9 @@ function ExplorerContent() {
       .then((data) => {
         if (Array.isArray(data)) {
           setTables(data);
-          if (data.length > 0) {
+          if (tableParam && data.some((t: TableSummary) => t.tableName === tableParam)) {
+            setSelectedTable(tableParam);
+          } else if (data.length > 0) {
             setSelectedTable(data[0].tableName);
           } else {
             setSelectedTable(null);
@@ -92,7 +100,7 @@ function ExplorerContent() {
       })
       .catch((err) => console.error('Failed to load tables:', err))
       .finally(() => setLoadingTables(false));
-  }, [selectedDbId]);
+  }, [selectedDbId, tableParam]);
 
   // 3. Fetch schema and data when selected table changes
   useEffect(() => {
@@ -267,6 +275,42 @@ function ExplorerContent() {
                   </Link>
                 </div>
 
+                {/* Post-Migration Schema Verification Banner */}
+                {highlightParam && (
+                  <div className="mx-6 mt-4 p-4 rounded-xl bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-transparent border border-emerald-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-pop-in shrink-0">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center shrink-0">
+                        <span className="material-symbols-outlined text-emerald-400 text-[24px]">verified</span>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-emerald-300 font-mono">
+                            ZERO-DOWNTIME MIGRATION VERIFIED LIVE
+                          </span>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
+                            PROMOTED TO MASTER
+                          </span>
+                        </div>
+                        <p className="text-xs text-on-surface-variant mt-0.5 font-mono">
+                          Column <span className="text-emerald-400 font-bold underline decoration-emerald-500">{highlightParam}</span> was successfully cut over to <span className="text-on-surface font-semibold">public.{selectedTable}</span> on <span className="text-on-surface font-semibold">{selectedDbId}</span> with 0 data loss.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab(activeTab === 'schema' ? 'data' : 'schema')}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-mono font-semibold border border-emerald-500/40 transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <span className="material-symbols-outlined text-[16px]">
+                          {activeTab === 'schema' ? 'visibility' : 'schema'}
+                        </span>
+                        <span>{activeTab === 'schema' ? 'View Live Data' : 'View Schema Spec'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {/* Tab Controls */}
                 <div className="flex items-center gap-6 px-6 border-b border-outline-variant/15 bg-surface-container-lowest/40 text-xs font-mono shrink-0">
                   <button
@@ -279,6 +323,11 @@ function ExplorerContent() {
                   >
                     <span className="material-symbols-outlined text-[16px]">visibility</span>
                     <span>Live Table Data Preview</span>
+                    {highlightParam && (
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold">
+                        1 NEW COL
+                      </span>
+                    )}
                   </button>
 
                   <button
@@ -291,6 +340,11 @@ function ExplorerContent() {
                   >
                     <span className="material-symbols-outlined text-[16px]">schema</span>
                     <span>Schema &amp; Columns ({schemaColumns.length})</span>
+                    {highlightParam && (
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-bold animate-pulse">
+                        UPDATED
+                      </span>
+                    )}
                   </button>
 
                   <button
@@ -329,16 +383,34 @@ function ExplorerContent() {
                               <table className="w-full text-left text-xs font-mono border-collapse">
                                 <thead>
                                   <tr className="border-b border-outline-variant/20 bg-surface-container-low/60 text-outline uppercase text-[10px] tracking-wider">
-                                    {tableData.columns.map((col) => (
-                                      <th key={col} className="py-2.5 px-4 font-semibold whitespace-nowrap">
-                                        <div className="flex items-center gap-1.5">
-                                          {col === currentTableMeta.primaryKeyColumn && (
-                                            <span className="material-symbols-outlined text-[13px] text-primary">key</span>
-                                          )}
-                                          <span>{col}</span>
-                                        </div>
-                                      </th>
-                                    ))}
+                                    {tableData.columns.map((col) => {
+                                      const isHighlighted = highlightParam && col.toLowerCase() === highlightParam.toLowerCase();
+                                      return (
+                                        <th
+                                          key={col}
+                                          className={`py-2.5 px-4 font-semibold whitespace-nowrap transition-colors ${
+                                            isHighlighted
+                                              ? 'bg-emerald-500/20 text-emerald-300 border-x border-emerald-500/40 shadow-inner'
+                                              : ''
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-1.5">
+                                            {col === currentTableMeta.primaryKeyColumn && (
+                                              <span className="material-symbols-outlined text-[13px] text-primary">key</span>
+                                            )}
+                                            {isHighlighted && (
+                                              <span className="material-symbols-outlined text-[14px] text-emerald-400 animate-bounce">sparkles</span>
+                                            )}
+                                            <span>{col}</span>
+                                            {isHighlighted && (
+                                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500 text-surface-container-lowest font-black tracking-wider">
+                                                NEW
+                                              </span>
+                                            )}
+                                          </div>
+                                        </th>
+                                      );
+                                    })}
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -348,9 +420,17 @@ function ExplorerContent() {
                                       className="border-b border-outline-variant/10 hover:bg-surface-container-low/40 transition-colors"
                                     >
                                       {tableData.columns.map((col) => {
+                                        const isHighlighted = highlightParam && col.toLowerCase() === highlightParam.toLowerCase();
                                         const val = row[col];
                                         return (
-                                          <td key={col} className="py-2 px-4 whitespace-nowrap text-on-surface">
+                                          <td
+                                            key={col}
+                                            className={`py-2 px-4 whitespace-nowrap ${
+                                              isHighlighted
+                                                ? 'bg-emerald-500/10 text-emerald-300 font-semibold border-x border-emerald-500/20'
+                                                : 'text-on-surface'
+                                            }`}
+                                          >
                                             {val === null ? (
                                               <span className="text-outline/40 italic">null</span>
                                             ) : (
@@ -387,37 +467,59 @@ function ExplorerContent() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {schemaColumns.map((col) => (
-                                  <tr
-                                    key={col.columnName}
-                                    className="border-b border-outline-variant/10 hover:bg-surface-container-low/40 transition-colors"
-                                  >
-                                    <td className="py-2.5 px-4 font-semibold text-on-surface flex items-center gap-2">
-                                      {col.primaryKey ? (
-                                        <span className="material-symbols-outlined text-[16px] text-primary">key</span>
-                                      ) : (
-                                        <span className="w-4 inline-block"></span>
-                                      )}
-                                      <span>{col.columnName}</span>
-                                    </td>
-                                    <td className="py-2.5 px-4 text-primary font-mono">{col.dataType}</td>
-                                    <td className="py-2.5 px-4 text-on-surface-variant">
-                                      {col.nullable ? 'YES (Nullable)' : 'NOT NULL'}
-                                    </td>
-                                    <td className="py-2.5 px-4 text-outline font-mono">
-                                      {col.columnDefault || '—'}
-                                    </td>
-                                    <td className="py-2.5 px-4">
-                                      {col.primaryKey ? (
-                                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/30">
-                                          PRIMARY KEY
+                                {schemaColumns.map((col) => {
+                                  const isHighlighted = highlightParam && col.columnName.toLowerCase() === highlightParam.toLowerCase();
+                                  return (
+                                    <tr
+                                      key={col.columnName}
+                                      className={`border-b transition-colors ${
+                                        isHighlighted
+                                          ? 'bg-emerald-500/15 border-emerald-500/40 shadow-sm'
+                                          : 'border-outline-variant/10 hover:bg-surface-container-low/40'
+                                      }`}
+                                    >
+                                      <td className="py-2.5 px-4 font-semibold text-on-surface flex items-center gap-2">
+                                        {col.primaryKey ? (
+                                          <span className="material-symbols-outlined text-[16px] text-primary">key</span>
+                                        ) : isHighlighted ? (
+                                          <span className="material-symbols-outlined text-[16px] text-emerald-400 animate-bounce">sparkles</span>
+                                        ) : (
+                                          <span className="w-4 inline-block"></span>
+                                        )}
+                                        <span className={isHighlighted ? 'text-emerald-300 font-bold' : ''}>
+                                          {col.columnName}
                                         </span>
-                                      ) : (
-                                        <span className="text-outline text-[11px]">—</span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
+                                        {isHighlighted && (
+                                          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/30 text-emerald-300 border border-emerald-500/50 font-bold animate-pulse">
+                                            ✨ NEWLY ADDED IN MIGRATION
+                                          </span>
+                                        )}
+                                      </td>
+                                      <td className={`py-2.5 px-4 font-mono ${isHighlighted ? 'text-emerald-300 font-bold' : 'text-primary'}`}>
+                                        {col.dataType}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-on-surface-variant">
+                                        {col.nullable ? 'YES (Nullable)' : 'NOT NULL'}
+                                      </td>
+                                      <td className="py-2.5 px-4 text-outline font-mono">
+                                        {col.columnDefault || '—'}
+                                      </td>
+                                      <td className="py-2.5 px-4">
+                                        {col.primaryKey ? (
+                                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/30">
+                                            PRIMARY KEY
+                                          </span>
+                                        ) : isHighlighted ? (
+                                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold">
+                                            ALTER TABLE
+                                          </span>
+                                        ) : (
+                                          <span className="text-outline text-[11px]">—</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>

@@ -106,3 +106,13 @@ export async function rollbackMigration(id: string, reason: string): Promise<Mig
   }
   return await res.json();
 }
+
+export async function clearFailedMigrations(): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/failed`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    console.error('Failed to clear failed migrations:', err);
+  }
+}

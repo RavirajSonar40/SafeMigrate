@@ -28,6 +28,7 @@ public class MigrationSession {
     private final int batchSize;
     private final long throttleDelayMs;
     private final boolean autoCutover;
+    private final String databaseId;
 
     private volatile MigrationState state = MigrationState.INITIALIZING;
     private volatile PreflightReport preflightReport;
@@ -60,6 +61,11 @@ public class MigrationSession {
 
     public MigrationSession(String id, String tableName, String ddlStatement,
                             int batchSize, long throttleDelayMs, boolean autoCutover) {
+        this(id, tableName, ddlStatement, batchSize, throttleDelayMs, autoCutover, null);
+    }
+
+    public MigrationSession(String id, String tableName, String ddlStatement,
+                            int batchSize, long throttleDelayMs, boolean autoCutover, String databaseId) {
         this.id = id;
         this.tableName = tableName;
         this.shadowTableName = tableName + "__shadow";
@@ -72,12 +78,18 @@ public class MigrationSession {
         this.batchSize = batchSize;
         this.throttleDelayMs = throttleDelayMs;
         this.autoCutover = autoCutover;
+        this.databaseId = databaseId;
+    }
+
+    public String getDatabaseId() {
+        return databaseId;
     }
 
     public MigrationResponse toResponse() {
         MigrationResponse res = new MigrationResponse();
         res.setId(id);
         res.setTableName(tableName);
+        res.setDatabaseId(databaseId);
         res.setShadowTableName(shadowTableName);
         res.setOldTableName(oldTableName);
         res.setSlotName(slotName);

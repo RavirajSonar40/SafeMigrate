@@ -3,12 +3,24 @@
 import { useState, useEffect } from 'react';
 import { MigrationProgressEvent, MigrationResponse } from './types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/migrations';
+const API_BASE_URL = typeof window !== 'undefined'
+  ? '/api/migrations'
+  : (process.env.INTERNAL_BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/migrations');
 
 export function useMigrationStream(initialData: MigrationResponse) {
   const [data, setData] = useState<MigrationResponse>(initialData);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [lastEvent, setLastEvent] = useState<MigrationProgressEvent | null>(null);
+
+  useEffect(() => {
+    if (initialData) {
+      setData((prev) => ({
+        ...prev,
+        ...initialData,
+        state: initialData.state || prev.state,
+      }));
+    }
+  }, [initialData?.state, initialData?.rowsBackfilled, initialData?.sourceRowCount, initialData?.totalSourceRows]);
 
   useEffect(() => {
     if (!initialData?.id) return;

@@ -99,18 +99,21 @@ public class ShadowTableManager {
 
             // 3. Apply the requested schema alteration to the shadow table
             if (targetAlterDdl != null && !targetAlterDdl.isBlank()) {
-                String ddl = targetAlterDdl.trim();
-                if (ddl.endsWith(";")) {
-                    ddl = ddl.substring(0, ddl.length() - 1).trim();
+                String[] statements = targetAlterDdl.split(";");
+                for (String raw : statements) {
+                    String clean = raw.replaceAll("(?m)^--.*$", "").trim();
+                    if (clean.isEmpty()) continue;
+                    String fullSql;
+                    if (clean.toUpperCase().startsWith("ALTER TABLE")) {
+                        fullSql = clean.replaceFirst("(?i)ALTER\\s+TABLE\\s+([\"'a-zA-Z0-9_]+)", "ALTER TABLE " + shadowTable) + ";";
+                    } else if (clean.toUpperCase().startsWith("CREATE")) {
+                        fullSql = clean.replaceAll("(?i)(ON\\s+)([\"'a-zA-Z0-9_]+)", "$1" + shadowTable) + ";";
+                    } else {
+                        fullSql = "ALTER TABLE " + shadowTable + " " + clean + ";";
+                    }
+                    log.info("Applying target schema change: {}", fullSql);
+                    stmt.execute(fullSql);
                 }
-                String fullAlterSql;
-                if (ddl.toUpperCase().startsWith("ALTER TABLE")) {
-                    fullAlterSql = ddl.replaceFirst("(?i)ALTER\\s+TABLE\\s+([\"'a-zA-Z0-9_]+)", "ALTER TABLE " + shadowTable) + ";";
-                } else {
-                    fullAlterSql = "ALTER TABLE " + shadowTable + " " + ddl + ";";
-                }
-                log.info("Applying target schema change: {}", fullAlterSql);
-                stmt.execute(fullAlterSql);
             }
 
             // 4. Ensure REPLICA IDENTITY FULL on the shadow table

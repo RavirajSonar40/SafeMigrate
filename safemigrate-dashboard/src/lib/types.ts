@@ -50,6 +50,7 @@ export interface MigrationResponse {
   completedAt?: string;
   initiatedBy?: string;
   database?: string;
+  databaseId?: string;
   approved?: boolean;
   approvedBy?: string;
   approvedAt?: string;

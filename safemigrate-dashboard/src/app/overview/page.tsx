@@ -7,12 +7,17 @@ import ActiveMigrationCard from '@/components/overview/ActiveMigrationCard';
 import RecentMigrationsTable from '@/components/overview/RecentMigrationsTable';
 import ClusterTopologyBar from '@/components/overview/ClusterTopologyBar';
 import PodFleetView from '@/components/overview/PodFleetView';
-import { fetchMigrations } from '@/lib/api';
+import { fetchMigrations, clearFailedMigrations } from '@/lib/api';
 import { MigrationResponse } from '@/lib/types';
 
 export default function OverviewPage() {
   const [migrations, setMigrations] = useState<MigrationResponse[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  const handleClearFailed = async () => {
+    await clearFailedMigrations();
+    setMigrations((prev) => prev.filter((m) => m.state !== 'FAILED' && m.state !== 'ROLLED_BACK'));
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -79,6 +84,7 @@ export default function OverviewPage() {
         activeCount={activeMigrations.length} 
         completedCount={completedMigrations.length} 
         failedCount={failedMigrations.length} 
+        onClearFailed={handleClearFailed}
       />
 
       {/* Active Migrations Section */}
