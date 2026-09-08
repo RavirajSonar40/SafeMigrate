@@ -1,0 +1,16 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: safemigrate-server
+
+safemigrate:
+  target-db:
+    url: jdbc:postgresql://localhost:5432/safemigrate_test
+    username: postgres
+    password: password
+  kafka:
+    bootstrap-servers: localhost:9092
+  redis:
+    address: redis://localhost:6380
