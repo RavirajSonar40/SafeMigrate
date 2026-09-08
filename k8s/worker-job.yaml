@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: safemigrate-worker-backfill
+  namespace: safemigrate
+  labels:
+    app: safemigrate-worker
+spec:
+  backoffLimit: 4
+  template:
+    metadata:
+      labels:
+        app: safemigrate-worker
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: worker
+          image: safemigrate-worker:latest
+          imagePullPolicy: IfNotPresent
+          args:
+            - "jdbc:postgresql://safemigrate-postgres:5432/safemigrate_test"
+            - "postgres"
+            - "password"
+            - "redis://safemigrate-redis:6379"
+            - "mig-prod-k8s-01"
+            - "users"
+            - "users_shadow"
+            - "id"
+            - "id,email,status,created_at"
+            - "500"
+            - "50"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 768Mi

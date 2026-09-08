@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: safemigrate-redis
+  namespace: safemigrate
+  labels:
+    app: safemigrate-redis
+spec:
+  ports:
+    - port: 6379
+      name: redis
+  selector:
+    app: safemigrate-redis
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: safemigrate-redis
+  namespace: safemigrate
+  labels:
+    app: safemigrate-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: safemigrate-redis
+  template:
+    metadata:
+      labels:
+        app: safemigrate-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+              name: redis
+          command: ["redis-server", "--appendonly", "yes"]
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 3
+            periodSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

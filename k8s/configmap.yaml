@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: safemigrate-config
+  namespace: safemigrate
+  labels:
+    app.kubernetes.io/name: safemigrate
+data:
+  POSTGRES_DB: "safemigrate_test"
+  POSTGRES_HOST: "safemigrate-postgres"
+  POSTGRES_PORT: "5432"
+  KAFKA_BOOTSTRAP_SERVERS: "safemigrate-kafka:9092"
+  REDIS_HOST: "safemigrate-redis"
+  REDIS_PORT: "6379"
+  REDIS_URL: "redis://safemigrate-redis:6379"
+  JDBC_URL: "jdbc:postgresql://safemigrate-postgres:5432/safemigrate_test"
+  NEXT_PUBLIC_API_URL: "http://safemigrate-server:8080/api/migrations"

@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: safemigrate-server
+  namespace: safemigrate
+  labels:
+    app: safemigrate-server
+spec:
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+      name: http
+  selector:
+    app: safemigrate-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: safemigrate-server
+  namespace: safemigrate
+  labels:
+    app: safemigrate-server
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: safemigrate-server
+  template:
+    metadata:
+      labels:
+        app: safemigrate-server
+    spec:
+      containers:
+        - name: server
+          image: safemigrate-server:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: SAFEMIGRATE_TARGET_DB_URL
+              value: "jdbc:postgresql://safemigrate-postgres:5432/safemigrate_test"
+            - name: SAFEMIGRATE_TARGET_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: safemigrate-secrets
+                  key: POSTGRES_USER
+            - name: SAFEMIGRATE_TARGET_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: safemigrate-secrets
+                  key: POSTGRES_PASSWORD
+            - name: SAFEMIGRATE_KAFKA_BOOTSTRAP_SERVERS
+              value: "safemigrate-kafka:9092"
+            - name: SAFEMIGRATE_REDIS_ADDRESS
+              value: "redis://safemigrate-redis:6379"
+            - name: SAFEMIGRATE_MIGRATION_APPROVAL_REQUIRED
+              value: "true"
+          readinessProbe:
+            httpGet:
+              path: /api/migrations
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /api/migrations
+              port: 8080
+            initialDelaySeconds: 25
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1024Mi

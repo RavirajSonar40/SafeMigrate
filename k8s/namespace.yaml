@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: safemigrate
+  labels:
+    app.kubernetes.io/name: safemigrate
+    app.kubernetes.io/part-of: safemigrate-platform

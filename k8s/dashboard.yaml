@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: safemigrate-dashboard
+  namespace: safemigrate
+  labels:
+    app: safemigrate-dashboard
+spec:
+  type: NodePort
+  ports:
+    - port: 3000
+      targetPort: 3000
+      nodePort: 30000
+      name: http
+  selector:
+    app: safemigrate-dashboard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: safemigrate-dashboard
+  namespace: safemigrate
+  labels:
+    app: safemigrate-dashboard
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: safemigrate-dashboard
+  template:
+    metadata:
+      labels:
+        app: safemigrate-dashboard
+    spec:
+      containers:
+        - name: dashboard
+          image: safemigrate-dashboard:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+              name: http
+          env:
+            - name: PORT
+              value: "3000"
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: NEXT_PUBLIC_API_URL
+              value: "/api/migrations"
+          readinessProbe:
+            httpGet:
+              path: /overview
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /overview
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
