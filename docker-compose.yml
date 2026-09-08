@@ -75,7 +75,7 @@ services:
       SAFEMIGRATE_TARGET_DB_PASSWORD: password
       SAFEMIGRATE_KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       SAFEMIGRATE_REDIS_ADDRESS: redis://redis:6379
-      SAFEMIGRATE_MIGRATION_APPROVAL_REQUIRED: "true"
+      SAFEMIGRATE_MIGRATION_APPROVAL_REQUIRED: "false"
     depends_on:
       postgres:
         condition: service_healthy
