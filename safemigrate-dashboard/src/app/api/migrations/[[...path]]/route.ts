@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 function getTargetUrl(req: NextRequest, pathArray?: string[]): string {
-  const base = process.env.INTERNAL_BACKEND_URL || 'http://localhost:8080/api/migrations';
+  const serverBase = process.env.INTERNAL_BACKEND_HOST || (process.env.INTERNAL_BACKEND_URL ? process.env.INTERNAL_BACKEND_URL.replace(/\/api\/migrations$/, '') : 'http://localhost:8080');
+  const base = `${serverBase}/api/migrations`;
   const subpath = pathArray && pathArray.length > 0 ? '/' + pathArray.join('/') : '';
   const query = req.nextUrl.search;
   return `${base}${subpath}${query}`;
@@ -48,6 +49,26 @@ export async function POST(
       method: 'POST',
       headers: { 'Content-Type': req.headers.get('content-type') || 'application/json' },
       body: body || undefined,
+    });
+    const contentType = res.headers.get('content-type') || 'application/json';
+    const data = await res.text();
+    return new Response(data, { status: res.status, headers: { 'Content-Type': contentType } });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ path?: string[] }> }
+) {
+  const resolvedParams = await params;
+  const target = getTargetUrl(req, resolvedParams.path);
+  try {
+    const res = await fetch(target, {
+      method: 'DELETE',
+      headers: { Accept: 'application/json' },
     });
     const contentType = res.headers.get('content-type') || 'application/json';
     const data = await res.text();

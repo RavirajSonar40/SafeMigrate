@@ -70,6 +70,165 @@ public class MigrationService {
         this.sseService = sseService;
         this.migrationExecutor = migrationExecutor;
         this.databaseService = databaseService;
+        initMigrationStorage();
+    }
+
+    /**
+     * Creates the migration_history table if it doesn't exist and loads persisted sessions.
+     */
+    private void initMigrationStorage() {
+        try (Connection c = DriverManager.getConnection(
+                properties.getTargetDb().getUrl(),
+                properties.getTargetDb().getUsername(),
+                properties.getTargetDb().getPassword());
+             Statement s = c.createStatement()) {
+
+            s.execute("""
+                CREATE TABLE IF NOT EXISTS migration_history (
+                    id VARCHAR(128) PRIMARY KEY,
+                    table_name VARCHAR(128) NOT NULL,
+                    ddl_statement TEXT,
+                    database_id VARCHAR(128),
+                    state VARCHAR(32) NOT NULL,
+                    total_source_rows BIGINT DEFAULT 0,
+                    rows_backfilled BIGINT DEFAULT 0,
+                    error_message TEXT,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP WITH TIME ZONE,
+                    cutover_duration_ms BIGINT,
+                    approved BOOLEAN DEFAULT FALSE,
+                    approved_by VARCHAR(128),
+                    approved_at TIMESTAMP WITH TIME ZONE,
+                    progress_percentage DOUBLE PRECISION DEFAULT 0.0
+                );
+            """);
+
+            // Load persisted completed/failed/rolled_back sessions
+            try (ResultSet rs = s.executeQuery("SELECT * FROM migration_history ORDER BY created_at DESC")) {
+                int count = 0;
+                while (rs.next()) {
+                    String id = rs.getString("id");
+                    String tableName = rs.getString("table_name");
+                    String ddl = rs.getString("ddl_statement");
+                    String dbId = rs.getString("database_id");
+                    String stateStr = rs.getString("state");
+
+                    MigrationSession session = new MigrationSession(id, tableName, ddl, 100, 10, false, dbId);
+                    try {
+                        session.setState(MigrationState.valueOf(stateStr));
+                    } catch (Exception e) {
+                        session.setState(MigrationState.FAILED);
+                    }
+                    session.setTotalSourceRows(rs.getLong("total_source_rows"));
+                    session.setRowsBackfilled(rs.getLong("rows_backfilled"));
+                    session.setErrorMessage(rs.getString("error_message"));
+
+                    java.sql.Timestamp completedTs = rs.getTimestamp("completed_at");
+                    if (completedTs != null) {
+                        session.setCompletedAt(completedTs.toInstant());
+                    }
+
+                    long cutoverMs = rs.getLong("cutover_duration_ms");
+                    if (!rs.wasNull()) {
+                        session.setCutoverDurationMs(cutoverMs);
+                    }
+
+                    session.setApproved(rs.getBoolean("approved"));
+                    session.setApprovedBy(rs.getString("approved_by"));
+                    java.sql.Timestamp approvedTs = rs.getTimestamp("approved_at");
+                    if (approvedTs != null) {
+                        session.setApprovedAt(approvedTs.toInstant());
+                    }
+
+                    // If migration was in-flight when server restarted, mark it as FAILED and release locks
+                    MigrationState curState = session.getState();
+                    if (curState == MigrationState.INITIALIZING || curState == MigrationState.BACKFILLING ||
+                            curState == MigrationState.CATCHING_UP || curState == MigrationState.CUTTING_OVER) {
+                        session.setState(MigrationState.FAILED);
+                        session.setErrorMessage("Migration interrupted by server restart");
+                        stateStore.setStatus(id, MigrationState.FAILED);
+                        stateStore.forceReleaseTableLock(session.getTableName(), session.getDatabaseId());
+                        persistSession(session);
+                        log.warn("Marked interrupted in-flight migration [{}] as FAILED and released table locks", id);
+                    }
+
+                    sessions.put(id, session);
+                    count++;
+                }
+                log.info("Loaded {} migration sessions from PostgreSQL history", count);
+            }
+        } catch (Exception e) {
+            log.error("Failed to initialize migration_history table: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Persists or updates a migration session to the migration_history table.
+     */
+    private void persistSession(MigrationSession session) {
+        String sql = """
+            INSERT INTO migration_history
+            (id, table_name, ddl_statement, database_id, state, total_source_rows, rows_backfilled,
+             error_message, created_at, completed_at, cutover_duration_ms, approved, approved_by, approved_at, progress_percentage)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (id) DO UPDATE SET
+            state = EXCLUDED.state,
+            total_source_rows = EXCLUDED.total_source_rows,
+            rows_backfilled = EXCLUDED.rows_backfilled,
+            error_message = EXCLUDED.error_message,
+            completed_at = EXCLUDED.completed_at,
+            cutover_duration_ms = EXCLUDED.cutover_duration_ms,
+            approved = EXCLUDED.approved,
+            approved_by = EXCLUDED.approved_by,
+            approved_at = EXCLUDED.approved_at,
+            progress_percentage = EXCLUDED.progress_percentage;
+        """;
+        try (Connection c = DriverManager.getConnection(
+                properties.getTargetDb().getUrl(),
+                properties.getTargetDb().getUsername(),
+                properties.getTargetDb().getPassword());
+             java.sql.PreparedStatement ps = c.prepareStatement(sql)) {
+
+            ps.setString(1, session.getId());
+            ps.setString(2, session.getTableName());
+            ps.setString(3, session.getDdlStatement());
+            ps.setString(4, session.getDatabaseId());
+            ps.setString(5, session.getState().name());
+            ps.setLong(6, session.getTotalSourceRows());
+            ps.setLong(7, session.getRowsBackfilled());
+            ps.setString(8, session.getErrorMessage());
+            ps.setTimestamp(9, java.sql.Timestamp.from(session.getCreatedAt()));
+
+            if (session.getCompletedAt() != null) {
+                ps.setTimestamp(10, java.sql.Timestamp.from(session.getCompletedAt()));
+            } else {
+                ps.setNull(10, java.sql.Types.TIMESTAMP);
+            }
+
+            if (session.getCutoverDurationMs() != null) {
+                ps.setLong(11, session.getCutoverDurationMs());
+            } else {
+                ps.setNull(11, java.sql.Types.BIGINT);
+            }
+
+            ps.setBoolean(12, session.isApproved());
+            ps.setString(13, session.getApprovedBy());
+
+            if (session.getApprovedAt() != null) {
+                ps.setTimestamp(14, java.sql.Timestamp.from(session.getApprovedAt()));
+            } else {
+                ps.setNull(14, java.sql.Types.TIMESTAMP);
+            }
+
+            double progress = session.getTotalSourceRows() > 0
+                    ? Math.min(100.0, (double) session.getRowsBackfilled() / (double) session.getTotalSourceRows() * 100.0)
+                    : (session.getState() == MigrationState.COMPLETED ? 100.0 : 0.0);
+            ps.setDouble(15, Math.round(progress * 10.0) / 10.0);
+
+            ps.executeUpdate();
+        } catch (Exception e) {
+            log.warn("Failed to persist migration session {}: {}", session.getId(), e.getMessage());
+        }
     }
 
     public Connection getConnection() throws SQLException {
@@ -117,6 +276,7 @@ public class MigrationService {
 
         MigrationSession session = new MigrationSession(id, tableName, ddl, batchSize, throttleDelayMs, autoCutover, request.getDatabaseId());
         sessions.put(id, session);
+        persistSession(session);
 
         // 1. Run Pre-Flight Inspection synchronously
         PreflightReport report;
@@ -128,6 +288,7 @@ public class MigrationService {
                 session.setErrorMessage("Pre-flight safety inspection failed: " + report.getErrors());
                 stateStore.setStatus(id, MigrationState.FAILED);
                 sseService.broadcastStatusChange(id, MigrationState.FAILED, session.getErrorMessage());
+                persistSession(session);
                 log.warn("Migration [{}] rejected by pre-flight checks: {}", id, report.getErrors());
                 return session.toResponse();
             }
@@ -136,6 +297,7 @@ public class MigrationService {
             session.setErrorMessage("Pre-flight check execution failed: " + e.getMessage());
             stateStore.setStatus(id, MigrationState.FAILED);
             sseService.broadcastStatusChange(id, MigrationState.FAILED, session.getErrorMessage());
+            persistSession(session);
             log.error("Migration [{}] pre-flight inspection threw exception: {}", id, e.getMessage(), e);
             return session.toResponse();
         }
@@ -159,8 +321,8 @@ public class MigrationService {
         WalKafkaProducer producer = null;
 
         try {
-            // Step 1: Acquire exclusive distributed lock on table
-            RLock lock = stateStore.acquireTableLock(tableName, 5, 3600);
+            // Step 1: Acquire exclusive distributed lock on table (scoped by databaseId)
+            RLock lock = stateStore.acquireTableLock(tableName, session.getDatabaseId(), 5, 3600);
             session.setTableLock(lock);
 
             session.setState(MigrationState.INITIALIZING);
@@ -234,6 +396,7 @@ public class MigrationService {
             session.setState(MigrationState.BACKFILLING);
             stateStore.setStatus(id, MigrationState.BACKFILLING);
             sseService.broadcastStatusChange(id, MigrationState.BACKFILLING, "Historical backfill started...");
+            persistSession(session);
 
             try (BackfillWorker worker = new BackfillWorker(
                     setupConn, stateStore, id, tableName, shadowTableName, pkColumn,
@@ -261,6 +424,7 @@ public class MigrationService {
             session.setState(MigrationState.CATCHING_UP);
             stateStore.setStatus(id, MigrationState.CATCHING_UP);
             sseService.broadcastStatusChange(id, MigrationState.CATCHING_UP, "Historical backfill complete. Catching up live replication lag...");
+            persistSession(session);
 
             try (Connection cutoverConn = getConnection(session.getDatabaseId())) {
                 CutoverCoordinator cutoverCoordinator = new CutoverCoordinator(
@@ -305,6 +469,7 @@ public class MigrationService {
             stateStore.setStatus(id, MigrationState.READY_CUTOVER);
             sseService.broadcastStatusChange(id, MigrationState.READY_CUTOVER, "Replication lag converged within safety threshold. Ready for cutover.");
             sseService.broadcastProgress(id, session.toProgressEvent());
+            persistSession(session);
 
             // If auto-cutover is enabled and approved, trigger cutover automatically
             if (session.isAutoCutover() && (!properties.getMigration().isApprovalRequired() || session.isApproved())) {
@@ -333,6 +498,7 @@ public class MigrationService {
                 session.setErrorMessage(e.getMessage());
                 stateStore.setStatus(id, MigrationState.FAILED);
                 sseService.broadcastError(id, e.getMessage());
+                persistSession(session);
                 cleanupSessionWorkers(session);
                 if (session.getTableLock() != null) {
                     stateStore.releaseTableLock(session.getTableLock());
@@ -435,6 +601,7 @@ public class MigrationService {
             sseService.broadcastStatusChange(id, MigrationState.COMPLETED, "Migration completed successfully in " + durationMs + "ms");
             sseService.broadcastProgress(id, session.toProgressEvent());
             sseService.completeStream(id);
+            persistSession(session);
 
             return session.toResponse();
         } catch (Exception e) {
@@ -443,6 +610,7 @@ public class MigrationService {
             session.setErrorMessage("Cutover failed: " + e.getMessage());
             stateStore.setStatus(id, MigrationState.FAILED);
             sseService.broadcastError(id, session.getErrorMessage());
+            persistSession(session);
             throw new RuntimeException("Cutover failed: " + e.getMessage(), e);
         }
     }
@@ -491,6 +659,7 @@ public class MigrationService {
 
         sseService.broadcastStatusChange(id, MigrationState.ROLLED_BACK, session.getErrorMessage());
         sseService.completeStream(id);
+        persistSession(session);
 
         return session.toResponse();
     }
@@ -513,6 +682,7 @@ public class MigrationService {
             session.setCompletedAt(Instant.now());
             stateStore.setStatus(id, MigrationState.REVERTED);
             sseService.broadcastStatusChange(id, MigrationState.REVERTED, "Migration successfully reverted to pre-cutover state.");
+            persistSession(session);
 
             return session.toResponse();
         } catch (Exception e) {
@@ -522,11 +692,32 @@ public class MigrationService {
     }
 
     public void clearFailedMigrations() {
+        List<String> idsToRemove = new ArrayList<>();
         sessions.entrySet().removeIf(entry -> {
-            MigrationState st = entry.getValue().getState();
-            return st == MigrationState.FAILED || st == MigrationState.ROLLED_BACK;
+            MigrationSession s = entry.getValue();
+            MigrationState st = s.getState();
+            boolean shouldRemove = st == MigrationState.FAILED || st == MigrationState.ROLLED_BACK;
+            if (shouldRemove) {
+                idsToRemove.add(entry.getKey());
+                stateStore.forceReleaseTableLock(s.getTableName(), s.getDatabaseId());
+            }
+            return shouldRemove;
         });
-        log.info("Cleared all failed and rolled back migration sessions");
+        // Also delete from persistent storage
+        if (!idsToRemove.isEmpty()) {
+            try (Connection c = DriverManager.getConnection(
+                    properties.getTargetDb().getUrl(),
+                    properties.getTargetDb().getUsername(),
+                    properties.getTargetDb().getPassword());
+                 Statement s = c.createStatement()) {
+                for (String rid : idsToRemove) {
+                    s.executeUpdate("DELETE FROM migration_history WHERE id = '" + rid.replace("'", "''") + "'");
+                }
+            } catch (Exception e) {
+                log.warn("Failed to delete cleared migrations from DB: {}", e.getMessage());
+            }
+        }
+        log.info("Cleared {} failed and rolled back migration sessions and released table locks", idsToRemove.size());
     }
 
     public MigrationResponse getMigration(String id) {

@@ -525,23 +525,26 @@ export default function CutoverPage({ params }: CutoverPageProps) {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
           {/* Animated Confetti Particles */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
-            {Array.from({ length: 42 }).map((_, i) => {
-              const colors = ['#10B981', '#34D399', '#F59E0B', '#38BDF8', '#A855F7', '#EC4899', '#F43F5E'];
+            {Array.from({ length: 50 }).map((_, i) => {
+              const colors = ['#10B981', '#34D399', '#F59E0B', '#38BDF8', '#A855F7', '#EC4899', '#F43F5E', '#22D3EE', '#FBBF24'];
               const color = colors[i % colors.length];
-              const left = `${(i * 2.4 + (i % 5) * 2.1) % 100}%`;
-              const top = `${(i * 3.3 + (i % 7) * 2.8) % 95}%`;
-              const size = (i % 3) === 0 ? 'w-2.5 h-2.5 rounded-full' : (i % 2) === 0 ? 'w-3 h-1.5 rounded-sm' : 'w-2 h-2 rotate-45';
-              const delay = `${(i * 0.07) % 1.5}s`;
+              const left = `${(i * 2.1 + Math.sin(i) * 8 + 3) % 98}%`;
+              const size = (i % 4) === 0 ? 'w-3 h-3 rounded-full' : (i % 3) === 0 ? 'w-4 h-1.5 rounded-sm' : (i % 2) === 0 ? 'w-2 h-2 rotate-45' : 'w-2.5 h-2.5 rounded-full';
+              const delay = `${(i * 0.08) % 2}s`;
+              const animClass = i % 2 === 0 ? 'animate-confetti' : 'animate-confetti-alt';
+              const duration = `${2.5 + (i % 5) * 0.4}s`;
               return (
                 <div
                   key={i}
-                  className={`absolute ${size} animate-pulse`}
+                  className={`absolute ${size} ${animClass}`}
                   style={{
                     backgroundColor: color,
                     left,
-                    top,
+                    top: `${-2 - (i % 8) * 2}%`,
                     animationDelay: delay,
-                    boxShadow: `0 0 8px ${color}80`
+                    animationDuration: duration,
+                    boxShadow: `0 0 8px ${color}80`,
+                    opacity: 0
                   }}
                 />
               );

@@ -107,7 +107,9 @@ public class ShadowTableManager {
                     if (clean.toUpperCase().startsWith("ALTER TABLE")) {
                         fullSql = clean.replaceFirst("(?i)ALTER\\s+TABLE\\s+([\"'a-zA-Z0-9_]+)", "ALTER TABLE " + shadowTable) + ";";
                     } else if (clean.toUpperCase().startsWith("CREATE")) {
-                        fullSql = clean.replaceAll("(?i)(ON\\s+)([\"'a-zA-Z0-9_]+)", "$1" + shadowTable) + ";";
+                        // Strip CONCURRENTLY for shadow table as it is an isolated unshared table and CONCURRENTLY fails inside transactions/poolers
+                        String stripped = clean.replaceAll("(?i)\\bCONCURRENTLY\\b", "").replaceAll("\\s{2,}", " ").trim();
+                        fullSql = stripped.replaceAll("(?i)(ON\\s+)([\"'a-zA-Z0-9_]+)", "$1" + shadowTable) + ";";
                     } else {
                         fullSql = "ALTER TABLE " + shadowTable + " " + clean + ";";
                     }

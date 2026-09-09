@@ -27,12 +27,13 @@ function CreateMigrationForm() {
   const [tableName, setTableName] = useState<string>(tableParam || 'orders');
   const [columnName, setColumnName] = useState<string>('priority_score');
   const [dataType, setDataType] = useState<string>('INTEGER');
-  const [defaultValue, setDefaultValue] = useState<string>('0');
-  const [isNotNull, setIsNotNull] = useState<boolean>(true);
-  const [createIndex, setCreateIndex] = useState<boolean>(true);
+  const [defaultValue, setDefaultValue] = useState<string>('');
+  const [isNotNull, setIsNotNull] = useState<boolean>(false);
+  const [createIndex, setCreateIndex] = useState<boolean>(false);
   const [rawSql, setRawSql] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [isSimulating, setIsSimulating] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const copyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -91,7 +92,7 @@ function CreateMigrationForm() {
   if (selectedPrimitive === 'raw-sql' && rawSql) {
     generatedDdl = rawSql;
   } else if (selectedPrimitive === 'add-index') {
-    generatedDdl = `CREATE INDEX CONCURRENTLY ${indexName} ON ${shadowTable} (${cleanCol});`;
+    generatedDdl = `CREATE INDEX ${indexName} ON ${shadowTable} (${cleanCol});`;
   } else if (selectedPrimitive === 'rename-column') {
     generatedDdl = `ALTER TABLE ${shadowTable} RENAME COLUMN ${cleanCol} TO ${cleanCol}_v2;`;
   } else if (selectedPrimitive === 'alter-type') {
@@ -105,7 +106,7 @@ ALTER TABLE ${shadowTable}
   ADD COLUMN ${cleanCol} ${dataType} ${defaultClause} ${notNullClause};`.trim();
 
     if (createIndex) {
-      generatedDdl += `\n\nCREATE INDEX CONCURRENTLY ${indexName} 
+      generatedDdl += `\n\nCREATE INDEX ${indexName} 
   ON ${shadowTable} (${cleanCol});`;
     }
   }
@@ -118,11 +119,25 @@ ALTER TABLE ${shadowTable}
   };
 
   const handleLaunch = async () => {
+    setErrorMessage(null);
+
+    // Validate NOT NULL without DEFAULT
+    if (isNotNull && defaultValue.trim() === '' && selectedPrimitive === 'add-column') {
+      setErrorMessage(
+        "Adding a NOT NULL column without a DEFAULT value causes table lock failures on tables with data. Please provide a default value (e.g. '0', 'default', or 'active') or uncheck NOT NULL."
+      );
+      return;
+    }
+
     setIsSimulating(true);
     try {
       const cleanTable = tableName.replace(/^public\./, '').trim();
       // 1. Run live preflight check against Spring Boot
-      await runPreflight(cleanTable, generatedDdl, selectedDb);
+      const preflight = await runPreflight(cleanTable, generatedDdl, selectedDb);
+      if (preflight && preflight.errors && preflight.errors.length > 0) {
+        setErrorMessage(`Pre-flight safety check failed: ${preflight.errors.join('; ')}`);
+        return;
+      }
       
       // 2. Submit migration to Spring Boot backend
       const res = await submitMigration({
@@ -134,9 +149,9 @@ ALTER TABLE ${shadowTable}
 
       // 3. Navigate to migration detail cockpit
       router.push(`/migrations/${res.id}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Migration submit failed:', error);
-      router.push('/overview');
+      setErrorMessage(error?.message || 'Failed to submit migration. Please check your inputs.');
     } finally {
       setIsSimulating(false);
     }
@@ -202,6 +217,24 @@ ALTER TABLE ${shadowTable}
           </div>
         </div>
       </div>
+
+      {/* Error Alert Banner */}
+      {errorMessage && (
+        <div className="p-4 rounded-xl bg-error/10 border border-error/30 text-error flex items-start gap-3 animate-fade-in shadow-sm">
+          <span className="material-symbols-outlined text-[22px] shrink-0 text-error">error</span>
+          <div className="flex flex-col gap-1 flex-1">
+            <span className="text-xs font-bold uppercase tracking-wider font-mono">Safety / Validation Check</span>
+            <p className="text-xs leading-relaxed text-on-surface">{errorMessage}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorMessage(null)}
+            className="text-on-surface-variant hover:text-on-surface text-xs p-1 rounded"
+          >
+            <span className="material-symbols-outlined text-[16px]">close</span>
+          </button>
+        </div>
+      )}
 
       {/* Main 2-Column Cockpit Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">

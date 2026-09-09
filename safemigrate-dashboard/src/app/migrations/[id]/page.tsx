@@ -225,6 +225,37 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
         </div>
       </header>
 
+      {/* Failure Alert Banner */}
+      {(migration.state === 'FAILED' || migration.state === 'ROLLED_BACK') && (
+        <div className="p-5 rounded-xl bg-error/10 border border-error/30 text-error flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-fade-in shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="material-symbols-outlined text-[24px] shrink-0 text-error mt-0.5">error</span>
+            <div className="flex flex-col gap-1">
+              <span className="text-xs font-bold uppercase tracking-wider font-mono">
+                {migration.state === 'ROLLED_BACK' ? 'Migration Rolled Back' : 'Migration Execution Failed'}
+              </span>
+              <p className="text-xs text-on-surface leading-relaxed">
+                {migration.errorMessage || 'An error occurred during migration execution. Check the logs below for diagnostic details.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Link
+              href="/migrations/new"
+              className="px-3 py-1.5 rounded-lg bg-primary text-surface-container-lowest font-semibold text-xs hover:bg-primary-fixed transition-colors shadow-sm"
+            >
+              Start New Migration
+            </Link>
+            <Link
+              href="/overview"
+              className="px-3 py-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs font-mono transition-colors border border-outline-variant/30"
+            >
+              Back to Overview
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* 5-Stage Lifecycle Stepper */}
       <section aria-label="Pipeline Stages" className="bg-surface-container-low rounded-xl p-4 shadow-sm border border-outline-variant/10">
         <div className="flex items-center justify-between text-on-surface-variant">

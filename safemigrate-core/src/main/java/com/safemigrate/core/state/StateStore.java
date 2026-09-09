@@ -34,14 +34,22 @@ public class StateStore implements AutoCloseable {
      * Acquires an exclusive distributed lock for the given table so only one migration can run at a time.
      */
     public RLock acquireTableLock(String tableName, long waitTimeSeconds, long leaseTimeSeconds) throws InterruptedException {
-        String lockKey = "safemigrate:lock:table:" + tableName.toLowerCase();
+        return acquireTableLock(tableName, null, waitTimeSeconds, leaseTimeSeconds);
+    }
+
+    /**
+     * Acquires an exclusive distributed lock scoped to a specific database + table combination.
+     */
+    public RLock acquireTableLock(String tableName, String databaseId, long waitTimeSeconds, long leaseTimeSeconds) throws InterruptedException {
+        String dbScope = (databaseId != null && !databaseId.isBlank()) ? databaseId : "default";
+        String lockKey = "safemigrate:lock:table:" + dbScope + ":" + tableName.toLowerCase();
         RLock lock = redisson.getLock(lockKey);
         boolean acquired = lock.tryLock(waitTimeSeconds, leaseTimeSeconds, TimeUnit.SECONDS);
         if (!acquired) {
             throw new IllegalStateException("Failed to acquire migration lock for table '" + tableName +
-                    "'. Another migration is currently active.");
+                    "' on database '" + dbScope + "'. Another migration is currently active.");
         }
-        log.info("Acquired exclusive migration lock for table: {}", tableName);
+        log.info("Acquired exclusive migration lock for table: {} on db: {}", tableName, dbScope);
         return lock;
     }
 
@@ -49,9 +57,17 @@ public class StateStore implements AutoCloseable {
      * Releases an acquired distributed lock.
      */
     public void releaseTableLock(RLock lock) {
-        if (lock != null && lock.isHeldByCurrentThread()) {
-            lock.unlock();
-            log.info("Released table migration lock: {}", lock.getName());
+        if (lock != null) {
+            try {
+                if (lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                } else if (lock.isLocked()) {
+                    lock.forceUnlock();
+                }
+                log.info("Released table migration lock: {}", lock.getName());
+            } catch (Exception e) {
+                log.warn("Failed to release table migration lock {}: {}", lock.getName(), e.getMessage());
+            }
         }
     }
 
@@ -59,7 +75,12 @@ public class StateStore implements AutoCloseable {
      * Checks whether an exclusive distributed lock is currently held on the given table.
      */
     public boolean isTableLocked(String tableName) {
-        String lockKey = "safemigrate:lock:table:" + tableName.toLowerCase();
+        return isTableLocked(tableName, null);
+    }
+
+    public boolean isTableLocked(String tableName, String databaseId) {
+        String dbScope = (databaseId != null && !databaseId.isBlank()) ? databaseId : "default";
+        String lockKey = "safemigrate:lock:table:" + dbScope + ":" + tableName.toLowerCase();
         RLock lock = redisson.getLock(lockKey);
         return lock.isLocked();
     }
@@ -68,7 +89,12 @@ public class StateStore implements AutoCloseable {
      * Forcefully unlocks the table lock (used during recovery or failover).
      */
     public void forceReleaseTableLock(String tableName) {
-        String lockKey = "safemigrate:lock:table:" + tableName.toLowerCase();
+        forceReleaseTableLock(tableName, null);
+    }
+
+    public void forceReleaseTableLock(String tableName, String databaseId) {
+        String dbScope = (databaseId != null && !databaseId.isBlank()) ? databaseId : "default";
+        String lockKey = "safemigrate:lock:table:" + dbScope + ":" + tableName.toLowerCase();
         RLock lock = redisson.getLock(lockKey);
         if (lock.isLocked()) {
             lock.forceUnlock();
