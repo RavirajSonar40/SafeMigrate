@@ -78,13 +78,15 @@ jobs:
 
       - name: Upload JARs to AWS EC2
         if: steps.check_secrets.outputs.configured == 'true'
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.AWS_HOST }}
-          username: ubuntu
-          key: ${{ secrets.AWS_SSH_KEY }}
-          source: "safemigrate-server/target/*.jar,safemigrate-core/target/*-worker.jar"
-          target: "/home/ubuntu/SafeMigrate"
+        env:
+          SSH_KEY: ${{ secrets.AWS_SSH_KEY }}
+          HOST: ${{ secrets.AWS_HOST }}
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_rsa
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar ubuntu@"$HOST":~/SafeMigrate/safemigrate-core/target/
 
       - name: Rebuild & Deploy Docker Stack on AWS
         if: steps.check_secrets.outputs.configured == 'true'
@@ -153,13 +155,15 @@ jobs:
 
       - name: Upload JARs to Oracle Cloud
         if: steps.check_secrets.outputs.configured == 'true'
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.ORACLE_HOST }}
-          username: ubuntu
-          key: ${{ secrets.ORACLE_SSH_KEY }}
-          source: "safemigrate-server/target/*.jar,safemigrate-core/target/*-worker.jar"
-          target: "/home/ubuntu/SafeMigrate"
+        env:
+          SSH_KEY: ${{ secrets.ORACLE_SSH_KEY }}
+          HOST: ${{ secrets.ORACLE_HOST }}
+        run: |
+          install -m 600 -D /dev/null ~/.ssh/id_rsa
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar ubuntu@"$HOST":~/SafeMigrate/safemigrate-core/target/
 
       - name: Rebuild & Deploy Docker Stack on Oracle
         if: steps.check_secrets.outputs.configured == 'true'
