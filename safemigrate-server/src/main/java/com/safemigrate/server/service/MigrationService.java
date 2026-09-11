@@ -21,6 +21,7 @@ import com.safemigrate.server.dto.ApprovalRequest;
 import com.safemigrate.server.dto.CreateMigrationRequest;
 import com.safemigrate.server.dto.DatabaseConnectionDto;
 import com.safemigrate.server.dto.MigrationResponse;
+import com.safemigrate.server.dto.TableMetadataDto;
 import org.redisson.api.RLock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -236,12 +237,8 @@ public class MigrationService {
     }
 
     public Connection getConnection(String databaseId) throws SQLException {
-        if (databaseId != null && !databaseId.isBlank() && databaseService != null) {
-            try {
-                return databaseService.getConnectionFor(databaseId);
-            } catch (Exception e) {
-                log.warn("Could not connect to databaseId {}, falling back to default: {}", databaseId, e.getMessage());
-            }
+        if (databaseId != null && !databaseId.isBlank() && !"default-postgres".equalsIgnoreCase(databaseId) && databaseService != null) {
+            return databaseService.getConnectionFor(databaseId);
         }
         return DriverManager.getConnection(
                 properties.getTargetDb().getUrl(),
@@ -250,12 +247,63 @@ public class MigrationService {
         );
     }
 
+    public String resolveDatabaseId(String tableName, String databaseId) {
+        if (databaseId != null && !databaseId.isBlank()) {
+            if ("default-postgres".equalsIgnoreCase(databaseId)) {
+                // If explicitly default-postgres, verify if table exists there
+                if (databaseService != null) {
+                    try {
+                        List<TableMetadataDto> defaultTables = databaseService.listTables("default-postgres");
+                        if (defaultTables.stream().anyMatch(t -> t.getTableName().equalsIgnoreCase(tableName))) {
+                            return "default-postgres";
+                        }
+                        // Table doesn't exist in default-postgres! Auto-route to database where it exists
+                        for (DatabaseConnectionDto db : databaseService.listDatabases()) {
+                            if (!"default-postgres".equals(db.getId())) {
+                                List<TableMetadataDto> tables = databaseService.listTables(db.getId());
+                                if (tables.stream().anyMatch(t -> t.getTableName().equalsIgnoreCase(tableName))) {
+                                    log.info("Auto-routed table '{}' from default-postgres to database '{}' ({})", tableName, db.getId(), db.getName());
+                                    return db.getId();
+                                }
+                            }
+                        }
+                    } catch (Exception ignored) {}
+                }
+                return "default-postgres";
+            }
+            return databaseId;
+        }
+
+        // Database ID was null/blank - auto-detect which database contains this table
+        if (databaseService != null) {
+            try {
+                List<TableMetadataDto> defaultTables = databaseService.listTables("default-postgres");
+                if (defaultTables.stream().anyMatch(t -> t.getTableName().equalsIgnoreCase(tableName))) {
+                    return "default-postgres";
+                }
+                for (DatabaseConnectionDto db : databaseService.listDatabases()) {
+                    if (!"default-postgres".equals(db.getId())) {
+                        List<TableMetadataDto> tables = databaseService.listTables(db.getId());
+                        if (tables.stream().anyMatch(t -> t.getTableName().equalsIgnoreCase(tableName))) {
+                            log.info("Auto-resolved database for table '{}' -> '{}' ({})", tableName, db.getId(), db.getName());
+                            return db.getId();
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Could not auto-resolve database for table {}: {}", tableName, e.getMessage());
+            }
+        }
+        return "default-postgres";
+    }
+
     public PreflightReport runPreflightCheck(String tableName, String ddlStatement) throws SQLException {
         return runPreflightCheck(tableName, ddlStatement, null);
     }
 
     public PreflightReport runPreflightCheck(String tableName, String ddlStatement, String databaseId) throws SQLException {
-        try (Connection conn = getConnection(databaseId)) {
+        String effectiveDbId = resolveDatabaseId(tableName, databaseId);
+        try (Connection conn = getConnection(effectiveDbId)) {
             PreflightInspector inspector = new PreflightInspector(conn);
             return inspector.inspect(tableName, ddlStatement);
         }
@@ -264,6 +312,7 @@ public class MigrationService {
     public MigrationResponse submitMigration(CreateMigrationRequest request) {
         String tableName = request.getTableName().trim();
         String ddl = request.getDdlStatement().trim();
+        String effectiveDbId = resolveDatabaseId(tableName, request.getDatabaseId());
 
         String id = "mig_" + System.currentTimeMillis() + "_" + UUID.randomUUID().toString().replace("-", "").substring(0, 6);
         int batchSize = (request.getBatchSize() != null && request.getBatchSize() > 0)
@@ -274,14 +323,14 @@ public class MigrationService {
                 : properties.getMigration().getDefaultThrottleDelayMs();
         boolean autoCutover = Boolean.TRUE.equals(request.getAutoCutover());
 
-        MigrationSession session = new MigrationSession(id, tableName, ddl, batchSize, throttleDelayMs, autoCutover, request.getDatabaseId());
+        MigrationSession session = new MigrationSession(id, tableName, ddl, batchSize, throttleDelayMs, autoCutover, effectiveDbId);
         sessions.put(id, session);
         persistSession(session);
 
         // 1. Run Pre-Flight Inspection synchronously
         PreflightReport report;
         try {
-            report = runPreflightCheck(tableName, ddl, request.getDatabaseId());
+            report = runPreflightCheck(tableName, ddl, effectiveDbId);
             session.setPreflightReport(report);
             if (!report.passed()) {
                 session.setState(MigrationState.FAILED);
@@ -333,9 +382,16 @@ public class MigrationService {
 
             // Count initial source rows
             try (Statement stmt = setupConn.createStatement();
-                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM \"" + tableName + "\"")) {
+                 ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM public.\"" + tableName + "\"")) {
                 if (rs.next()) {
                     session.setTotalSourceRows(rs.getLong(1));
+                }
+            } catch (Exception e) {
+                try (Statement stmt = setupConn.createStatement();
+                     ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM \"" + tableName + "\"")) {
+                    if (rs.next()) {
+                        session.setTotalSourceRows(rs.getLong(1));
+                    }
                 }
             }
 

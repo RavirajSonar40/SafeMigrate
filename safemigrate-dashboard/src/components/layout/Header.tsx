@@ -11,8 +11,45 @@ export default function Header() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
-  const [activeCluster, setActiveCluster] = useState('production-db-us-east');
+  interface ClusterItem {
+    id: string;
+    name: string;
+    region: string;
+    status: string;
+    nodes: number;
+  }
+
+  const [clusters, setClusters] = useState<ClusterItem[]>([
+    { id: 'supabase-production', name: 'Supabase Production', region: 'ap-southeast-1', status: 'ONLINE', nodes: 8 },
+    { id: 'default-postgres', name: 'Primary PostgreSQL', region: 'Local Docker', status: 'ONLINE', nodes: 4 },
+  ]);
+  const [activeCluster, setActiveCluster] = useState('supabase-production');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Fetch real clusters
+  useEffect(() => {
+    fetch('/api/databases')
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          const mapped = data.map((d: any) => ({
+            id: d.id,
+            name: d.name || d.id,
+            region: d.host?.includes('supabase') ? 'ap-southeast-1' : 'Local Docker',
+            status: d.status || 'ONLINE',
+            nodes: d.host?.includes('supabase') ? 8 : 4
+          }));
+          setClusters(mapped);
+          const saved = typeof window !== 'undefined' ? localStorage.getItem('safemigrate_active_cluster') : null;
+          if (saved && mapped.some((c: ClusterItem) => c.id === saved)) {
+            setActiveCluster(saved);
+          } else {
+            setActiveCluster(mapped[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // ⌘K hotkey listener
   useEffect(() => {
@@ -25,12 +62,6 @@ export default function Header() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  const clusters = [
-    { id: 'production-db-us-east', name: 'production-db-us-east', region: 'AWS us-east-1', status: 'ONLINE', nodes: 8 },
-    { id: 'staging-db-eu-west', name: 'staging-db-eu-west', region: 'AWS eu-west-1', status: 'STANDBY', nodes: 4 },
-    { id: 'analytics-replica', name: 'analytics-replica-us', region: 'GCP us-central1', status: 'READ-ONLY', nodes: 2 },
-  ];
 
   const notifications = [
     { id: 1, title: 'Replication In-Sync', desc: 'Table orders CDC lag reached 0 ms baseline.', time: '2m ago', type: 'success' },
@@ -78,6 +109,9 @@ export default function Header() {
                   key={cluster.id}
                   onClick={() => {
                     setActiveCluster(cluster.id);
+                    if (typeof window !== 'undefined') {
+                      localStorage.setItem('safemigrate_active_cluster', cluster.id);
+                    }
                     setShowClusterMenu(false);
                   }}
                   className={`flex items-center justify-between p-2.5 rounded-lg text-left transition-colors text-xs ${

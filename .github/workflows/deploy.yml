@@ -63,23 +63,30 @@ jobs:
           name: worker-jar
           path: safemigrate-core/target
 
-      - name: Setup SSH
+      - name: Prepare Host & Git Sync on AWS
         if: steps.check_secrets.outputs.configured == 'true'
-        run: |
-          mkdir -p ~/.ssh
-          printf "%s\n" "${{ secrets.AWS_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.AWS_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.AWS_HOST }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_KEY }}
+          script: |
+            cd ~/SafeMigrate
+            git fetch origin main
+            git reset --hard origin/main
+            mkdir -p safemigrate-server/target safemigrate-core/target
 
       - name: Upload JARs to AWS EC2
         if: steps.check_secrets.outputs.configured == 'true'
-        continue-on-error: true
-        run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@${{ secrets.AWS_HOST }} "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-server/target/*.jar ubuntu@${{ secrets.AWS_HOST }}:~/SafeMigrate/safemigrate-server/target/
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-core/target/*-worker.jar ubuntu@${{ secrets.AWS_HOST }}:~/SafeMigrate/safemigrate-core/target/
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.AWS_HOST }}
+          username: ubuntu
+          key: ${{ secrets.AWS_SSH_KEY }}
+          source: "safemigrate-server/target/*.jar,safemigrate-core/target/*-worker.jar"
+          target: "/home/ubuntu/SafeMigrate"
 
-      - name: Update Code & Rebuild Docker Stack on AWS
+      - name: Rebuild & Deploy Docker Stack on AWS
         if: steps.check_secrets.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -90,14 +97,15 @@ jobs:
             cd ~/SafeMigrate
             echo "==================================================" | tee -a deploy.log
             echo "🚀 [DEPLOY TRIGGERED] $(date -u)" | tee -a deploy.log
-            echo "Pre-deploy commit: $(git rev-parse --short HEAD)" | tee -a deploy.log
-            git pull origin main | tee -a deploy.log
             echo "Deployed commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%B | head -n 1)" | tee -a deploy.log
             echo "GITHUB_CLIENT_ID=Ov23liQRA1aEwV0iPyLo" > .env
             echo "GITHUB_CLIENT_SECRET=9fbb6e739f3466b9f913e896745175ac0bb60668" >> .env
             echo "NEXT_PUBLIC_GITHUB_CLIENT_ID=Ov23liQRA1aEwV0iPyLo" >> .env
-            echo "🔄 Rebuilding Docker Compose fleet..." | tee -a deploy.log
-            docker compose up -d --build | tee -a deploy.log
+            echo "Checking uploaded JARs:" | tee -a deploy.log
+            ls -lh safemigrate-server/target/*.jar safemigrate-core/target/*.jar 2>/dev/null | tee -a deploy.log
+            echo "🔄 Rebuilding Docker Compose fleet with fresh JARs..." | tee -a deploy.log
+            docker compose build --no-cache server worker dashboard | tee -a deploy.log
+            docker compose up -d | tee -a deploy.log
             echo "✅ Deployment finished successfully at $(date -u)" | tee -a deploy.log
             docker compose ps | tee -a deploy.log
             echo "==================================================" | tee -a deploy.log
@@ -130,23 +138,30 @@ jobs:
           name: worker-jar
           path: safemigrate-core/target
 
-      - name: Setup SSH
+      - name: Prepare Host & Git Sync on Oracle
         if: steps.check_secrets.outputs.configured == 'true'
-        run: |
-          mkdir -p ~/.ssh
-          printf "%s\n" "${{ secrets.ORACLE_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H ${{ secrets.ORACLE_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ubuntu
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            cd ~/SafeMigrate
+            git fetch origin main
+            git reset --hard origin/main
+            mkdir -p safemigrate-server/target safemigrate-core/target
 
       - name: Upload JARs to Oracle Cloud
         if: steps.check_secrets.outputs.configured == 'true'
-        continue-on-error: true
-        run: |
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@${{ secrets.ORACLE_HOST }} "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-server/target/*.jar ubuntu@${{ secrets.ORACLE_HOST }}:~/SafeMigrate/safemigrate-server/target/
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-core/target/*-worker.jar ubuntu@${{ secrets.ORACLE_HOST }}:~/SafeMigrate/safemigrate-core/target/
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ubuntu
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          source: "safemigrate-server/target/*.jar,safemigrate-core/target/*-worker.jar"
+          target: "/home/ubuntu/SafeMigrate"
 
-      - name: Update Code & Rebuild Docker Stack on Oracle
+      - name: Rebuild & Deploy Docker Stack on Oracle
         if: steps.check_secrets.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -157,14 +172,15 @@ jobs:
             cd ~/SafeMigrate
             echo "==================================================" | tee -a deploy.log
             echo "🚀 [ORACLE DEPLOY TRIGGERED] $(date -u)" | tee -a deploy.log
-            echo "Pre-deploy commit: $(git rev-parse --short HEAD)" | tee -a deploy.log
-            git pull origin main | tee -a deploy.log
             echo "Deployed commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%B | head -n 1)" | tee -a deploy.log
             echo "GITHUB_CLIENT_ID=Ov23liQRA1aEwV0iPyLo" > .env
             echo "GITHUB_CLIENT_SECRET=9fbb6e739f3466b9f913e896745175ac0bb60668" >> .env
             echo "NEXT_PUBLIC_GITHUB_CLIENT_ID=Ov23liQRA1aEwV0iPyLo" >> .env
-            echo "🔄 Rebuilding Docker Compose fleet on Oracle..." | tee -a deploy.log
-            docker compose up -d --build | tee -a deploy.log
+            echo "Checking uploaded JARs:" | tee -a deploy.log
+            ls -lh safemigrate-server/target/*.jar safemigrate-core/target/*.jar 2>/dev/null | tee -a deploy.log
+            echo "🔄 Rebuilding Docker Compose fleet on Oracle with fresh JARs..." | tee -a deploy.log
+            docker compose build --no-cache server worker dashboard | tee -a deploy.log
+            docker compose up -d | tee -a deploy.log
             echo "✅ Deployment finished successfully at $(date -u)" | tee -a deploy.log
             docker compose ps | tee -a deploy.log
             echo "==================================================" | tee -a deploy.log

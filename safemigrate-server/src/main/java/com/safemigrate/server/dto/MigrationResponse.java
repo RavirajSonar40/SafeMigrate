@@ -242,4 +242,14 @@ public class MigrationResponse {
     public void setDatabaseId(String databaseId) {
         this.databaseId = databaseId;
     }
+
+    public String getDatabase() {
+        return databaseId;
+    }
+
+    public void setDatabase(String database) {
+        if (this.databaseId == null || this.databaseId.isBlank()) {
+            this.databaseId = database;
+        }
+    }
 }

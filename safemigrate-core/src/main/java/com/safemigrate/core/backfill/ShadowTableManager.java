@@ -35,23 +35,47 @@ public class ShadowTableManager {
      * Inspects PostgreSQL metadata to find the primary key column name of the source table.
      */
     public String findPrimaryKeyColumn(String sourceTable) throws SQLException {
+        String clean = sourceTable.replaceFirst("(?i)^public\\.", "").trim();
         String sql = """
             SELECT a.attname
             FROM   pg_index i
             JOIN   pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-            WHERE  i.indrelid = ?::regclass
+            WHERE  (i.indrelid = ?::regclass OR i.indrelid = ('public.' || ?)::regclass)
             AND    i.indisprimary
             LIMIT 1;
         """;
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-            stmt.setString(1, sourceTable);
+            stmt.setString(1, clean);
+            stmt.setString(2, clean);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString(1);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Primary key query failed with clean identifier '{}': {}", clean, e.getMessage());
+        }
+
+        // Fallback: search information_schema
+        String fallbackSql = """
+            SELECT kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+              ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+              AND tc.table_name = ?
+            ORDER BY kcu.ordinal_position LIMIT 1;
+        """;
+        try (PreparedStatement stmt = connection.prepareStatement(fallbackSql)) {
+            stmt.setString(1, clean.toLowerCase());
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     return rs.getString(1);
                 }
             }
         }
+
         throw new IllegalStateException("Table '" + sourceTable + "' has no primary key. SafeMigrate requires a primary key.");
     }
 
@@ -60,6 +84,7 @@ public class ShadowTableManager {
      */
     public List<String> getColumnNames(String tableName) throws SQLException {
         List<String> columns = new ArrayList<>();
+        String clean = tableName.replaceFirst("(?i)^public\\.", "").trim().toLowerCase();
         String sql = """
             SELECT column_name
             FROM information_schema.columns
@@ -68,7 +93,7 @@ public class ShadowTableManager {
         """;
 
         try (PreparedStatement stmt = connection.prepareStatement(sql)) {
-            stmt.setString(1, tableName.toLowerCase());
+            stmt.setString(1, clean);
             try (ResultSet rs = stmt.executeQuery()) {
                 while (rs.next()) {
                     columns.add(rs.getString(1));
@@ -86,7 +111,8 @@ public class ShadowTableManager {
      * @return The created shadow table name
      */
     public String createShadowTable(String sourceTable, String targetAlterDdl) throws SQLException {
-        String shadowTable = getShadowTableName(sourceTable);
+        String cleanSource = sourceTable.replaceFirst("(?i)^public\\.", "").trim();
+        String shadowTable = getShadowTableName(cleanSource);
 
         try (Statement stmt = connection.createStatement()) {
             // 1. Clean up any existing shadow table from a prior aborted run
@@ -94,8 +120,12 @@ public class ShadowTableManager {
             stmt.execute("DROP TABLE IF EXISTS " + shadowTable + " CASCADE;");
 
             // 2. Create the shadow table cloning all defaults, constraints, and indexes
-            log.info("Creating shadow table '{}' cloned from '{}'...", shadowTable, sourceTable);
-            stmt.execute("CREATE TABLE " + shadowTable + " (LIKE " + sourceTable + " INCLUDING ALL);");
+            log.info("Creating shadow table '{}' cloned from '{}'...", shadowTable, cleanSource);
+            try {
+                stmt.execute("CREATE TABLE " + shadowTable + " (LIKE public.\"" + cleanSource + "\" INCLUDING ALL);");
+            } catch (Exception e) {
+                stmt.execute("CREATE TABLE " + shadowTable + " (LIKE \"" + cleanSource + "\" INCLUDING ALL);");
+            }
 
             // 3. Apply the requested schema alteration to the shadow table
             if (targetAlterDdl != null && !targetAlterDdl.isBlank()) {

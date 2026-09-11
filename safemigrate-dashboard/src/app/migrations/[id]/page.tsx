@@ -21,11 +21,11 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
     tableName: 'orders',
     shadowTableName: 'orders__shadow',
     state: 'READY_CUTOVER',
-    totalSourceRows: 1466,
-    rowsBackfilled: 1466,
-    progressPercentage: 100.0,
+    totalSourceRows: 0,
+    rowsBackfilled: 0,
+    progressPercentage: 0.0,
     replicationLagBytes: 0,
-    database: 'production-db-us-east',
+    databaseId: 'supabase-production',
     createdAt: new Date().toISOString()
   });
 

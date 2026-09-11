@@ -65,7 +65,7 @@ function CreateMigrationForm() {
           setAvailableTables(names);
           if (tableParam && names.includes(tableParam)) {
             setTableName(tableParam);
-          } else if (names.length > 0 && !tableParam) {
+          } else if (names.length > 0 && (!tableName || !names.includes(tableName))) {
             setTableName(names[0]);
           }
         }
@@ -170,7 +170,7 @@ function CreateMigrationForm() {
               </span>
               <span className="text-[10px] font-mono text-on-surface-variant/80 uppercase">Verified</span>
             </div>
-            <p className="text-xs text-on-surface truncate">{tableName}</p>
+            <p className="text-xs text-on-surface truncate">public.{tableName} <span className="text-outline text-[11px]">({databases.find(d => d.id === selectedDb)?.name || selectedDb})</span></p>
           </div>
 
           {/* Step 2 */}
