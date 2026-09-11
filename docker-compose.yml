@@ -93,6 +93,9 @@ services:
     environment:
       INTERNAL_BACKEND_URL: http://server:8080/api/migrations
       NEXT_PUBLIC_API_URL: http://localhost:8080/api/migrations
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      NEXT_PUBLIC_GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
     depends_on:
       - server
 

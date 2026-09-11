@@ -3,21 +3,35 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
+  const state = searchParams.get('state');
+  const error = searchParams.get('error');
+  const errorDescription = searchParams.get('error_description');
+
+  if (error) {
+    return NextResponse.redirect(
+      new URL(`/login?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription || '')}`, request.url)
+    );
+  }
 
   if (!code) {
     return NextResponse.redirect(new URL('/login?error=missing_code', request.url));
+  }
+
+  // Validate CSRF state
+  const storedState = request.cookies.get('safemigrate_oauth_state')?.value;
+  if (storedState && state && storedState !== state) {
+    return NextResponse.redirect(new URL('/login?error=csrf_state_mismatch', request.url));
   }
 
   const clientId = process.env.GITHUB_CLIENT_ID || process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
   const clientSecret = process.env.GITHUB_CLIENT_SECRET;
 
   if (!clientId || !clientSecret) {
-    // If secrets aren't set in container env, redirect back with notice
     return NextResponse.redirect(new URL('/login?error=oauth_credentials_not_set', request.url));
   }
 
   try {
-    // 1. Exchange code for access token
+    // 1. Exchange authorization code for GitHub access token
     const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
       headers: {
@@ -35,35 +49,92 @@ export async function GET(request: NextRequest) {
     const accessToken = tokenData.access_token;
 
     if (!accessToken) {
-      return NextResponse.redirect(new URL('/login?error=token_exchange_failed', request.url));
+      const errCode = tokenData.error || 'token_exchange_failed';
+      const errDesc = tokenData.error_description || 'Failed to obtain access token from GitHub';
+      return NextResponse.redirect(
+        new URL(`/login?error=${encodeURIComponent(errCode)}&error_description=${encodeURIComponent(errDesc)}`, request.url)
+      );
     }
 
-    // 2. Fetch authenticated user profile
+    // 2. Fetch authenticated GitHub user profile
     const userRes = await fetch('https://api.github.com/user', {
       headers: {
         Authorization: `Bearer ${accessToken}`,
-        'User-Agent': 'SafeMigrate-Platform',
+        'User-Agent': 'SafeMigrate-Enterprise-Control-Plane',
       },
     });
 
+    if (!userRes.ok) {
+      throw new Error(`Failed to fetch GitHub profile: status ${userRes.status}`);
+    }
+
     const userData = await userRes.json();
 
-    const response = NextResponse.redirect(new URL('/overview', request.url));
-    // Set a lightweight cookie with user identity for hydration
-    response.cookies.set('safemigrate_oauth_user', JSON.stringify({
+    // 3. Fetch user emails to get verified primary email (handles users with private emails)
+    let userEmail = userData.email;
+    try {
+      const emailsRes = await fetch('https://api.github.com/user/emails', {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'User-Agent': 'SafeMigrate-Enterprise-Control-Plane',
+        },
+      });
+      if (emailsRes.ok) {
+        const emails: Array<{ email: string; primary: boolean; verified: boolean }> = await emailsRes.json();
+        const primary = emails.find((e) => e.primary && e.verified) || emails.find((e) => e.verified) || emails[0];
+        if (primary?.email) {
+          userEmail = primary.email;
+        }
+      }
+    } catch {
+      // Non-fatal, fallback to profile email
+    }
+
+    if (!userEmail) {
+      userEmail = `${userData.login}@users.noreply.github.com`;
+    }
+
+    const userSession = {
       id: `gh_${userData.id}`,
       name: userData.name || userData.login,
       username: userData.login,
-      email: userData.email || `${userData.login}@users.noreply.github.com`,
-      avatar: userData.avatar_url,
-      role: userData.bio || 'Platform Engineer',
-      provider: 'github',
-      team: 'Database Reliability',
-    }), { path: '/', maxAge: 60 * 60 * 24 * 7 });
+      email: userEmail,
+      avatar: userData.avatar_url || `https://avatars.githubusercontent.com/u/${userData.id}?v=4`,
+      role: userData.bio || 'Platform Owner & Infrastructure Lead',
+      provider: 'github' as const,
+      team: userData.company || 'Core Data & Database Reliability',
+    };
+
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+    const proto = request.headers.get('x-forwarded-proto') || (host.startsWith('localhost') ? 'http' : 'http');
+    const isHttps = proto === 'https';
+
+    const response = NextResponse.redirect(new URL('/overview', request.url));
+
+    // Store signed session cookie (HTTP-only)
+    response.cookies.set('safemigrate_session', Buffer.from(JSON.stringify(userSession)).toString('base64'), {
+      httpOnly: true,
+      secure: isHttps,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
+
+    // Store readable user identity cookie for client hydration
+    response.cookies.set('safemigrate_oauth_user', JSON.stringify(userSession), {
+      httpOnly: false,
+      secure: isHttps,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+    });
+
+    // Clear state cookie
+    response.cookies.delete('safemigrate_oauth_state');
 
     return response;
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
+    const message = err instanceof Error ? err.message : 'Unknown error during authentication';
     return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, request.url));
   }
 }

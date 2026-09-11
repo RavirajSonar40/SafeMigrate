@@ -3,9 +3,11 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const { user } = useAuth();
   const [activeModal, setActiveModal] = useState<string | null>(null);
 
   // Settings form state
@@ -363,7 +365,7 @@ export default function Sidebar() {
               </p>
               <div className="flex items-center gap-2 pt-2 border-t border-outline-variant/10 text-[11px] font-mono text-outline">
                 <span className="material-symbols-outlined text-[15px] text-primary">verified</span>
-                <span>Sign-off active for current session (Sara Chen · Staff SRE)</span>
+                <span>Sign-off active for current session ({user ? `${user.name} · ${user.role}` : 'Platform Engineer'})</span>
               </div>
             </div>
 
