@@ -74,11 +74,13 @@ jobs:
             cd ~/SafeMigrate
             git fetch origin main
             git reset --hard origin/main
-            mkdir -p safemigrate-server/target safemigrate-core/target
+            sudo chown -R ubuntu:ubuntu ~/SafeMigrate
+            sudo rm -rf ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target
+            mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target
+            chmod -R 777 ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target
             echo "=== Host Info ==="
             uname -a
             free -m
-            df -h ~/SafeMigrate
 
       - name: Upload JARs to AWS EC2
         if: steps.check_secrets.outputs.configured == 'true'
@@ -87,15 +89,12 @@ jobs:
           HOST: ${{ secrets.AWS_HOST }}
         run: |
           mkdir -p ~/.ssh
-          # Check if SSH_KEY has literal '\n' characters and expand them if needed
           if printf "%s" "$SSH_KEY" | grep -q '\\n'; then
             printf "%b\n" "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
           else
             printf "%s\n" "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
           fi
           chmod 600 ~/.ssh/id_rsa
-          head -n 2 ~/.ssh/id_rsa
-          tail -n 2 ~/.ssh/id_rsa
 
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
@@ -110,12 +109,8 @@ jobs:
             exit 1
           fi
 
-          echo "Testing SSH connection to $HOST..."
-          ssh -vvv -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/id_rsa ubuntu@"$HOST" "echo 'SSH handshake successful!'; mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target" 2>&1 | tee ssh_debug.log || {
-            echo "=== SSH FAILED. FULL DEBUG LOG: ==="
-            cat ssh_debug.log
-            exit 1
-          }
+          echo "Preparing target directories on $HOST..."
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/id_rsa ubuntu@"$HOST" "sudo chown -R ubuntu:ubuntu ~/SafeMigrate; sudo rm -rf ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target; mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target; chmod -R 777 ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
 
           echo "Uploading Server JAR..."
           scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$SERVER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar
@@ -186,7 +181,10 @@ jobs:
             cd ~/SafeMigrate
             git fetch origin main
             git reset --hard origin/main
-            mkdir -p safemigrate-server/target safemigrate-core/target
+            sudo chown -R ubuntu:ubuntu ~/SafeMigrate
+            sudo rm -rf ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target
+            mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target
+            chmod -R 777 ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target
 
       - name: Upload JARs to Oracle Cloud
         if: steps.check_secrets.outputs.configured == 'true'
@@ -195,7 +193,11 @@ jobs:
           HOST: ${{ secrets.ORACLE_HOST }}
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+          if printf "%s" "$SSH_KEY" | grep -q '\\n'; then
+            printf "%b\n" "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+          else
+            printf "%s\n" "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+          fi
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
 
@@ -210,12 +212,13 @@ jobs:
             exit 1
           fi
 
-          echo "Testing SSH connection to $HOST..."
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ubuntu@"$HOST" "mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
+          echo "Preparing target directories on $HOST..."
+          ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -i ~/.ssh/id_rsa ubuntu@"$HOST" "sudo chown -R ubuntu:ubuntu ~/SafeMigrate; sudo rm -rf ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target; mkdir -p ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target; chmod -R 777 ~/SafeMigrate/safemigrate-server/target ~/SafeMigrate/safemigrate-core/target"
+
           echo "Uploading Server JAR..."
-          scp -v -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$SERVER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$SERVER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar
           echo "Uploading Worker JAR..."
-          scp -v -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$WORKER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$WORKER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar
           echo "JAR uploads to Oracle completed successfully!"
 
       - name: Rebuild & Deploy Docker Stack on Oracle
