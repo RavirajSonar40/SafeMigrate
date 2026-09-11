@@ -206,7 +206,9 @@ public class PreflightInspector {
         if (ddl.contains(";")) {
             String[] statements = ddl.split(";");
             for (String s : statements) {
-                String clean = s.replaceAll("(?m)^--.*$", "").trim();
+                String clean = s.replaceAll("--.*", "")
+                                .replaceAll("/\\*.*?\\*/", "")
+                                .trim();
                 if (clean.isEmpty()) continue;
                 String upper = clean.toUpperCase();
                 boolean isAllowedDdl = upper.startsWith("ALTER TABLE") 

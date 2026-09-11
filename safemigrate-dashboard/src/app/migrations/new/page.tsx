@@ -101,9 +101,7 @@ function CreateMigrationForm() {
     generatedDdl = `ALTER TABLE ${shadowTable} ADD CONSTRAINT check_${cleanCol} CHECK (${cleanCol} >= 0) NOT VALID;\nALTER TABLE ${shadowTable} VALIDATE CONSTRAINT check_${cleanCol};`;
   } else {
     // Add Column
-    generatedDdl = `-- SafeMigrate generated shadow operation:
-ALTER TABLE ${shadowTable} 
-  ADD COLUMN ${cleanCol} ${dataType} ${defaultClause} ${notNullClause};`.trim();
+    generatedDdl = `ALTER TABLE ${shadowTable} ADD COLUMN ${cleanCol} ${dataType} ${defaultClause} ${notNullClause};`.trim();
 
     if (createIndex) {
       generatedDdl += `\n\nCREATE INDEX ${indexName} 

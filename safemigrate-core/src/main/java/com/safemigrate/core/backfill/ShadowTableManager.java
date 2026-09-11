@@ -101,18 +101,21 @@ public class ShadowTableManager {
             if (targetAlterDdl != null && !targetAlterDdl.isBlank()) {
                 String[] statements = targetAlterDdl.split(";");
                 for (String raw : statements) {
-                    String clean = raw.replaceAll("(?m)^--.*$", "").trim();
+                    String clean = raw.replaceAll("--.*", "")
+                                      .replaceAll("/\\*.*?\\*/", "")
+                                      .trim();
                     if (clean.isEmpty()) continue;
                     String fullSql;
                     if (clean.toUpperCase().startsWith("ALTER TABLE")) {
-                        fullSql = clean.replaceFirst("(?i)ALTER\\s+TABLE\\s+([\"'a-zA-Z0-9_]+)", "ALTER TABLE " + shadowTable) + ";";
+                        fullSql = clean.replaceFirst("(?i)ALTER\\s+TABLE\\s+([\"'a-zA-Z0-9_\\.]+)", "ALTER TABLE " + shadowTable);
                     } else if (clean.toUpperCase().startsWith("CREATE")) {
                         // Strip CONCURRENTLY for shadow table as it is an isolated unshared table and CONCURRENTLY fails inside transactions/poolers
                         String stripped = clean.replaceAll("(?i)\\bCONCURRENTLY\\b", "").replaceAll("\\s{2,}", " ").trim();
-                        fullSql = stripped.replaceAll("(?i)(ON\\s+)([\"'a-zA-Z0-9_]+)", "$1" + shadowTable) + ";";
+                        fullSql = stripped.replaceAll("(?i)(ON\\s+)([\"'a-zA-Z0-9_\\.]+)", "$1" + shadowTable);
                     } else {
-                        fullSql = "ALTER TABLE " + shadowTable + " " + clean + ";";
+                        fullSql = "ALTER TABLE " + shadowTable + " " + clean;
                     }
+                    fullSql = fullSql.replaceAll(";+$", "") + ";";
                     log.info("Applying target schema change: {}", fullSql);
                     stmt.execute(fullSql);
                 }
