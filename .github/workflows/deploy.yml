@@ -27,13 +27,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: server-jar
-          path: safemigrate-server/target/*.jar
+          path: safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar
 
       - name: Upload Worker JAR
         uses: actions/upload-artifact@v4
         with:
           name: worker-jar
-          path: safemigrate-core/target/*-worker.jar
+          path: safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar
 
   deploy-aws:
     name: Deploy to AWS EC2
@@ -85,8 +85,20 @@ jobs:
           install -m 600 -D /dev/null ~/.ssh/id_rsa
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar ubuntu@"$HOST":~/SafeMigrate/safemigrate-core/target/
+
+          SERVER_JAR=$(find . -name "safemigrate-server-*.jar" ! -name "*.original" | head -n 1)
+          WORKER_JAR=$(find . -name "safemigrate-core-*-worker.jar" | head -n 1)
+          echo "Discovered Server JAR: $SERVER_JAR"
+          echo "Discovered Worker JAR: $WORKER_JAR"
+
+          if [ -z "$SERVER_JAR" ] || [ -z "$WORKER_JAR" ]; then
+            echo "ERROR: Missing JAR files on runner!"
+            find . -name "*.jar"
+            exit 1
+          fi
+
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$SERVER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$WORKER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar
 
       - name: Rebuild & Deploy Docker Stack on AWS
         if: steps.check_secrets.outputs.configured == 'true'
@@ -162,8 +174,20 @@ jobs:
           install -m 600 -D /dev/null ~/.ssh/id_rsa
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar ubuntu@"$HOST":~/SafeMigrate/safemigrate-core/target/
+
+          SERVER_JAR=$(find . -name "safemigrate-server-*.jar" ! -name "*.original" | head -n 1)
+          WORKER_JAR=$(find . -name "safemigrate-core-*-worker.jar" | head -n 1)
+          echo "Discovered Server JAR: $SERVER_JAR"
+          echo "Discovered Worker JAR: $WORKER_JAR"
+
+          if [ -z "$SERVER_JAR" ] || [ -z "$WORKER_JAR" ]; then
+            echo "ERROR: Missing JAR files on runner!"
+            find . -name "*.jar"
+            exit 1
+          fi
+
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$SERVER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-server/target/safemigrate-server-1.0.0-SNAPSHOT.jar
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa "$WORKER_JAR" ubuntu@"$HOST":~/SafeMigrate/safemigrate-core/target/safemigrate-core-1.0.0-SNAPSHOT-worker.jar
 
       - name: Rebuild & Deploy Docker Stack on Oracle
         if: steps.check_secrets.outputs.configured == 'true'
