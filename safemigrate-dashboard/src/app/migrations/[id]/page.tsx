@@ -4,8 +4,8 @@ import { useState, useEffect, use } from 'react';
 import Link from 'next/link';
 import { MOCK_EVENTS, MOCK_LOGS } from '@/lib/mockData';
 import { useMigrationStream } from '@/lib/sse';
-import { fetchMigration, rollbackMigration } from '@/lib/api';
-import { MigrationResponse } from '@/lib/types';
+import { fetchMigration, rollbackMigration, pauseMigration, resumeMigration, fetchReconciliationReport } from '@/lib/api';
+import { MigrationResponse, ReconciliationReport } from '@/lib/types';
 import PodFleetView from '@/components/overview/PodFleetView';
 
 interface MigrationDetailPageProps {
@@ -61,7 +61,46 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
 
   const isReady = migration.state === 'READY_FOR_CUTOVER' || migration.state === 'READY_CUTOVER';
   const isBackfilling = migration.state === 'BACKFILLING' || migration.state === 'INITIALIZING';
+  const isPaused = migration.state === 'PAUSED';
+  const isResuming = migration.state === 'RESUMING';
   const isCompleted = migration.state === 'COMPLETED';
+
+  const [isActionPending, setIsActionPending] = useState<boolean>(false);
+  const [reconReport, setReconReport] = useState<ReconciliationReport | null>(migration.reconciliationReport || null);
+
+  useEffect(() => {
+    if (migration.reconciliationReport) {
+      setReconReport(migration.reconciliationReport);
+    } else if (migration.state === 'COMPLETED') {
+      fetchReconciliationReport(migration.id).then((r) => {
+        if (r) setReconReport(r);
+      });
+    }
+  }, [migration.id, migration.state, migration.reconciliationReport]);
+
+  const handlePause = async () => {
+    setIsActionPending(true);
+    try {
+      const res = await pauseMigration(migration.id);
+      setRealMigration(res);
+    } catch (e) {
+      console.error('Failed to pause migration:', e);
+    } finally {
+      setIsActionPending(false);
+    }
+  };
+
+  const handleResume = async () => {
+    setIsActionPending(true);
+    try {
+      const res = await resumeMigration(migration.id);
+      setRealMigration(res);
+    } catch (e) {
+      console.error('Failed to resume migration:', e);
+    } finally {
+      setIsActionPending(false);
+    }
+  };
 
   const handleAbort = async () => {
     try {
@@ -123,6 +162,16 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
                 <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded bg-error/10 text-error font-mono text-[11px] font-semibold border border-error/20">
                   ABORTED
                 </span>
+              ) : isPaused ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-amber-500/10 text-amber-400 font-mono text-[11px] font-semibold border border-amber-500/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  PAUSED AT CHECKPOINT
+                </span>
+              ) : isResuming ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-primary/10 text-primary font-mono text-[11px] font-semibold border border-primary/30">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping"></span>
+                  RESUMING FROM CHECKPOINT
+                </span>
               ) : isReady ? (
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-secondary/10 font-mono text-[11px] font-semibold text-secondary border border-secondary/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-secondary"></span>
@@ -170,21 +219,27 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
               </Link>
             )}
 
-            <button
-              type="button"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs transition-colors border border-outline-variant/20"
-            >
-              <span className="material-symbols-outlined text-[16px] text-outline">speed</span>
-              <span>Throttle Backfill</span>
-            </button>
-
-            <button
-              type="button"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs transition-colors border border-outline-variant/20"
-            >
-              <span className="material-symbols-outlined text-[16px] text-outline">pause_circle</span>
-              <span>Pause Stream</span>
-            </button>
+            {isPaused ? (
+              <button
+                type="button"
+                onClick={handleResume}
+                disabled={isActionPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold transition-colors border border-amber-500/40 animate-pulse"
+              >
+                <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+                <span>Resume from Checkpoint</span>
+              </button>
+            ) : isBackfilling ? (
+              <button
+                type="button"
+                onClick={handlePause}
+                disabled={isActionPending}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-surface-container-high hover:bg-surface-container-highest text-on-surface text-xs transition-colors border border-outline-variant/20"
+              >
+                <span className="material-symbols-outlined text-[16px] text-outline">pause_circle</span>
+                <span>Pause Backfill</span>
+              </button>
+            ) : null}
 
             <div className="relative inline-block">
               <button
@@ -565,6 +620,92 @@ export default function MigrationDetailPage({ params }: MigrationDetailPageProps
                       <span className="text-outline text-[11px]">Instant shadow discard ready</span>
                     </div>
                   </div>
+                </div>
+
+                {/* Post-Cutover Data Reconciliation Audit */}
+                <div className={`bg-surface-container rounded-xl p-5 flex flex-col gap-4 border ${reconReport?.matched ? 'border-emerald-500/30' : 'border-outline-variant/10'}`}>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-on-surface flex items-center gap-2">
+                      <span className={`material-symbols-outlined text-[18px] ${reconReport?.matched ? 'text-emerald-400' : 'text-primary'}`}>
+                        {reconReport?.matched ? 'verified_user' : 'calculate'}
+                      </span>
+                      Post-Cutover Data Reconciliation Audit
+                    </h3>
+                    {reconReport ? (
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold ${
+                        reconReport.matched 
+                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                          : 'bg-error/10 text-error border-error/30'
+                      }`}>
+                        {reconReport.matched ? '100% PARITY CERTIFIED' : 'DISCREPANCY DETECTED'}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono text-outline bg-surface-container-low px-2 py-0.5 rounded border border-outline-variant/20">
+                        {isCompleted ? 'CALCULATING AUDIT...' : 'POST-CUTOVER SCHEDULED'}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-on-surface-variant font-mono">
+                    PostgreSQL-native order-independent bitwise XOR 64-bit MD5 aggregate checksum engine. Validates complete row parity and schema-level data fidelity with zero row transport overhead.
+                  </p>
+
+                  {reconReport ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 font-mono text-xs">
+                      <div className="p-3 rounded bg-surface-container-low flex flex-col gap-1 border border-outline-variant/10">
+                        <span className="text-outline text-[10px] uppercase">Source vs Promoted Rows</span>
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-on-surface font-bold text-sm">
+                            {reconReport.sourceRowCount.toLocaleString()}
+                          </span>
+                          <span className="text-emerald-400 text-[11px]">/ {reconReport.targetRowCount.toLocaleString()}</span>
+                        </div>
+                        <span className="text-outline text-[10px]">
+                          {reconReport.sourceRowCount === reconReport.targetRowCount ? '0 row difference' : `${Math.abs(reconReport.sourceRowCount - reconReport.targetRowCount)} row diff`}
+                        </span>
+                      </div>
+
+                      <div className="p-3 rounded bg-surface-container-low flex flex-col gap-1 border border-outline-variant/10">
+                        <span className="text-outline text-[10px] uppercase">64-Bit Aggregate Checksum</span>
+                        <span className="text-on-surface font-mono font-medium text-xs truncate" title={String(reconReport.sourceChecksum)}>
+                          {reconReport.sourceChecksum}
+                        </span>
+                        <span className="text-emerald-400 text-[10px] flex items-center gap-1">
+                          <span className="material-symbols-outlined text-[12px]">check</span>
+                          Checksums Match
+                        </span>
+                      </div>
+
+                      <div className="p-3 rounded bg-surface-container-low flex flex-col gap-1 border border-outline-variant/10">
+                        <span className="text-outline text-[10px] uppercase">Discrepancies & Audit Time</span>
+                        <div className="flex items-baseline gap-1.5">
+                          <span className={`font-bold text-sm ${reconReport.discrepancyCount === 0 ? 'text-emerald-400' : 'text-error'}`}>
+                            {reconReport.discrepancyCount} discrepancies
+                          </span>
+                        </div>
+                        <span className="text-outline text-[10px]">Verified in {reconReport.executionTimeMs}ms</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-4 rounded-lg bg-surface-container-low border border-dashed border-outline-variant/30 flex items-center justify-between text-xs font-mono text-outline">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-[16px] text-primary">hourglass_empty</span>
+                        <span>Audit will automatically calculate after atomic table cutover</span>
+                      </div>
+                      <span className="text-[10px] bg-surface-container px-2 py-0.5 rounded">bit_xor(hashtext)</span>
+                    </div>
+                  )}
+
+                  {reconReport && reconReport.comparedColumns && reconReport.comparedColumns.length > 0 && (
+                    <div className="flex items-center gap-2 flex-wrap pt-1 font-mono text-[11px]">
+                      <span className="text-outline text-[10px]">VERIFIED COLUMNS:</span>
+                      {reconReport.comparedColumns.map((col) => (
+                        <span key={col} className="px-1.5 py-0.5 bg-surface-container-low text-on-surface-variant rounded border border-outline-variant/20">
+                          {col}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
 

@@ -11,6 +11,7 @@ import com.safemigrate.core.kafka.WalKafkaConsumer;
 import com.safemigrate.core.kafka.WalKafkaProducer;
 import com.safemigrate.core.preflight.PreflightInspector;
 import com.safemigrate.core.preflight.PreflightReport;
+import com.safemigrate.core.reconcile.ReconciliationReport;
 import com.safemigrate.core.state.MigrationState;
 import com.safemigrate.core.state.StateStore;
 import com.safemigrate.core.wal.PostgresReplicationConnectionFactory;
@@ -471,8 +472,12 @@ public class MigrationService {
                 session.setRowsBackfilled(worker.getRowsBackfilled());
             }
 
-            // Check if cancelled/rolled back during backfill
+            // Check if cancelled/rolled back or paused during backfill
             if (session.getState() == MigrationState.ROLLED_BACK || session.getState() == MigrationState.FAILED) {
+                return;
+            }
+            if (session.getState() == MigrationState.PAUSED) {
+                log.info("Migration [{}] paused mid-backfill. Checkpointed at PK {}.", id, stateStore.getLastCopiedPk(id));
                 return;
             }
 
@@ -635,6 +640,16 @@ public class MigrationService {
             long durationMs = coordinator.executeCutover();
             session.setCutoverDurationMs(durationMs);
 
+            // 3b. Load post-cutover data reconciliation audit report
+            try {
+                String reconJson = stateStore.getReconciliationReport(id);
+                if (reconJson != null && !reconJson.isBlank()) {
+                    session.setReconciliationReport(ReconciliationReport.fromJson(reconJson));
+                }
+            } catch (Exception reconErr) {
+                log.warn("Could not attach reconciliation report to session {}: {}", id, reconErr.getMessage());
+            }
+
             // 4. Teardown active background streaming workers cleanly
             cleanupSessionWorkers(session);
 
@@ -745,6 +760,217 @@ public class MigrationService {
             log.error("Emergency revert failed for migration [{}]: {}", id, e.getMessage(), e);
             throw new RuntimeException("Emergency revert failed: " + e.getMessage(), e);
         }
+    }
+
+    public MigrationResponse pauseMigration(String id) {
+        MigrationSession session = sessions.get(id);
+        if (session == null) {
+            throw new IllegalArgumentException("Migration not found with id: " + id);
+        }
+        if (session.getState() == MigrationState.PAUSED) {
+            return session.toResponse();
+        }
+        if (session.getState() != MigrationState.BACKFILLING && session.getState() != MigrationState.INITIALIZING) {
+            throw new IllegalStateException("Cannot pause migration in state " + session.getState() + ". Only active backfilling migrations can be paused.");
+        }
+
+        log.info("Pausing migration [{}] for table '{}'", id, session.getTableName());
+        session.setState(MigrationState.PAUSED);
+        stateStore.setStatus(id, MigrationState.PAUSED);
+
+        if (session.getBackfillWorker() != null) {
+            session.getBackfillWorker().stop();
+        }
+
+        Long checkpointPk = stateStore.getLastCopiedPk(id);
+        long rowsCopied = stateStore.getRowsBackfilled(id);
+        session.setRowsBackfilled(rowsCopied);
+
+        String msg = "Migration paused at checkpoint PK " + (checkpointPk != null ? checkpointPk : 0) + " (" + rowsCopied + " rows backfilled)";
+        sseService.broadcastStatusChange(id, MigrationState.PAUSED, msg);
+        sseService.broadcastProgress(id, session.toProgressEvent());
+        persistSession(session);
+
+        return session.toResponse();
+    }
+
+    public MigrationResponse resumeMigration(String id) {
+        MigrationSession session = sessions.get(id);
+        if (session == null) {
+            throw new IllegalArgumentException("Migration not found with id: " + id);
+        }
+        if (session.getState() == MigrationState.BACKFILLING || session.getState() == MigrationState.CATCHING_UP) {
+            return session.toResponse();
+        }
+        if (session.getState() != MigrationState.PAUSED) {
+            throw new IllegalStateException("Cannot resume migration in state " + session.getState() + ". Migration must be PAUSED to resume.");
+        }
+
+        log.info("Resuming migration [{}] from checkpoint PK {}...", id, stateStore.getLastCopiedPk(id));
+        session.setState(MigrationState.RESUMING);
+        stateStore.setStatus(id, MigrationState.RESUMING);
+        sseService.broadcastStatusChange(id, MigrationState.RESUMING, "Resuming migration from last checkpoint...");
+        persistSession(session);
+
+        migrationExecutor.submit(() -> resumeMigrationLifecycle(session));
+        return session.toResponse();
+    }
+
+    private void resumeMigrationLifecycle(MigrationSession session) {
+        String id = session.getId();
+        String tableName = session.getTableName();
+        String shadowTableName = session.getShadowTableName();
+        String oldTableName = session.getOldTableName();
+
+        Connection resumeConn = null;
+        try {
+            resumeConn = getConnection(session.getDatabaseId());
+            ShadowTableManager shadowMgr = new ShadowTableManager(resumeConn);
+            String pkColumn = shadowMgr.findPrimaryKeyColumn(tableName);
+            List<String> columns = shadowMgr.getColumnNames(tableName);
+
+            session.setState(MigrationState.BACKFILLING);
+            stateStore.setStatus(id, MigrationState.BACKFILLING);
+            Long lastPk = stateStore.getLastCopiedPk(id);
+            sseService.broadcastStatusChange(id, MigrationState.BACKFILLING, "Resuming historical backfill from PK > " + (lastPk != null ? lastPk : 0));
+            persistSession(session);
+
+            ChangeApplier changeApplier = session.getChangeApplier();
+
+            try (BackfillWorker worker = new BackfillWorker(
+                    resumeConn, stateStore, id, tableName, shadowTableName, pkColumn,
+                    columns, session.getBatchSize(), session.getThrottleDelayMs())) {
+                session.setBackfillWorker(worker);
+                worker.setProgressListener((lastCopiedPk, totalCopied) -> {
+                    session.setRowsBackfilled(totalCopied);
+                    session.setLastAppliedLsn(stateStore.getLastAppliedLsn(id));
+                    if (changeApplier != null) {
+                        session.setAppliedInserts(changeApplier.getInsertCount());
+                        session.setAppliedUpdates(changeApplier.getUpdateCount());
+                        session.setAppliedDeletes(changeApplier.getDeleteCount());
+                        session.setTotalApplied(changeApplier.getTotalApplied());
+                    }
+                    sseService.broadcastProgress(id, session.toProgressEvent());
+                });
+                worker.runBackfill();
+                session.setRowsBackfilled(worker.getRowsBackfilled());
+            }
+
+            if (session.getState() == MigrationState.ROLLED_BACK || session.getState() == MigrationState.FAILED) {
+                return;
+            }
+            if (session.getState() == MigrationState.PAUSED) {
+                log.info("Migration [{}] paused again during resumed backfill.", id);
+                return;
+            }
+
+            session.setState(MigrationState.CATCHING_UP);
+            stateStore.setStatus(id, MigrationState.CATCHING_UP);
+            sseService.broadcastStatusChange(id, MigrationState.CATCHING_UP, "Historical backfill complete. Catching up live replication lag...");
+            persistSession(session);
+
+            try (Connection cutoverConn = getConnection(session.getDatabaseId())) {
+                CutoverCoordinator cutoverCoordinator = new CutoverCoordinator(
+                        cutoverConn, stateStore, id, tableName, shadowTableName, oldTableName,
+                        properties.getMigration().getMaxLockTimeoutMs()
+                );
+                session.setCutoverCoordinator(cutoverCoordinator);
+
+                long lastApplied = (changeApplier != null) ? changeApplier.getTotalApplied() : 0L;
+                int quiescentCount = 0;
+                for (int i = 0; i < 40; i++) {
+                    if (session.getState() == MigrationState.ROLLED_BACK) return;
+
+                    long curLag = cutoverCoordinator.getReplicationLagBytes();
+                    session.setReplicationLagBytes(curLag == Long.MAX_VALUE ? 0 : curLag);
+                    if (changeApplier != null) {
+                        session.setAppliedInserts(changeApplier.getInsertCount());
+                        session.setAppliedUpdates(changeApplier.getUpdateCount());
+                        session.setAppliedDeletes(changeApplier.getDeleteCount());
+                        session.setTotalApplied(changeApplier.getTotalApplied());
+                    }
+                    sseService.broadcastProgress(id, session.toProgressEvent());
+
+                    long curApplied = (changeApplier != null) ? changeApplier.getTotalApplied() : 0L;
+                    long maxAllowedLag = properties.getMigration().getMaxAllowedLagBytes();
+                    boolean lagCaughtUp = (curLag != Long.MAX_VALUE && curLag <= maxAllowedLag);
+                    boolean quiesced = (curApplied == lastApplied);
+                    if (lagCaughtUp || quiesced) {
+                        quiescentCount++;
+                        if (quiescentCount >= 2) break;
+                    } else {
+                        quiescentCount = 0;
+                        lastApplied = curApplied;
+                    }
+                    Thread.sleep(500);
+                }
+            }
+
+            session.setState(MigrationState.READY_CUTOVER);
+            stateStore.setStatus(id, MigrationState.READY_CUTOVER);
+            sseService.broadcastStatusChange(id, MigrationState.READY_CUTOVER, "Replication lag converged within safety threshold. Ready for cutover.");
+            sseService.broadcastProgress(id, session.toProgressEvent());
+            persistSession(session);
+
+            if (session.isAutoCutover() && (!properties.getMigration().isApprovalRequired() || session.isApproved())) {
+                executeCutover(id);
+                return;
+            }
+
+            while (session.getState() == MigrationState.READY_CUTOVER) {
+                if (session.isAutoCutover() && session.isApproved()) {
+                    executeCutover(id);
+                    return;
+                }
+                if (changeApplier != null) {
+                    session.setAppliedInserts(changeApplier.getInsertCount());
+                    session.setAppliedUpdates(changeApplier.getUpdateCount());
+                    session.setAppliedDeletes(changeApplier.getDeleteCount());
+                    session.setTotalApplied(changeApplier.getTotalApplied());
+                }
+                sseService.broadcastProgress(id, session.toProgressEvent());
+                Thread.sleep(1000);
+            }
+
+        } catch (Exception e) {
+            log.error("Resumed migration [{}] failed: {}", id, e.getMessage(), e);
+            if (session.getState() != MigrationState.ROLLED_BACK && session.getState() != MigrationState.COMPLETED) {
+                session.setState(MigrationState.FAILED);
+                session.setErrorMessage(e.getMessage());
+                stateStore.setStatus(id, MigrationState.FAILED);
+                sseService.broadcastError(id, e.getMessage());
+                persistSession(session);
+                cleanupSessionWorkers(session);
+                if (session.getTableLock() != null) {
+                    stateStore.releaseTableLock(session.getTableLock());
+                    session.setTableLock(null);
+                }
+            }
+        } finally {
+            if (resumeConn != null) {
+                try { resumeConn.close(); } catch (Exception ignored) {}
+            }
+        }
+    }
+
+    public ReconciliationReport getReconciliationReport(String id) {
+        MigrationSession session = sessions.get(id);
+        if (session != null && session.getReconciliationReport() != null) {
+            return session.getReconciliationReport();
+        }
+        String json = stateStore.getReconciliationReport(id);
+        if (json != null && !json.isBlank()) {
+            try {
+                ReconciliationReport report = ReconciliationReport.fromJson(json);
+                if (session != null) {
+                    session.setReconciliationReport(report);
+                }
+                return report;
+            } catch (Exception e) {
+                log.warn("Failed to deserialize stored reconciliation report for [{}]: {}", id, e.getMessage());
+            }
+        }
+        return null;
     }
 
     public void clearFailedMigrations() {

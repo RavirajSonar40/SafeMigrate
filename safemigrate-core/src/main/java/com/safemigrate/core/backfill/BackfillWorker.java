@@ -127,9 +127,23 @@ public class BackfillWorker implements AutoCloseable {
                     progressListener.onBatchCompleted(currentPk, totalRowsCopied);
                 }
 
+                // Check if worker was paused or cancelled during or after this batch
+                if (!running.get()) {
+                    log.info("Backfill worker cleanly paused at PK {}. Total rows copied so far: {}",
+                            currentPk, totalRowsCopied);
+                    return;
+                }
+
                 // Throttling to prevent spiking DB CPU or IOPS
                 if (throttleDelayMs > 0) {
                     Thread.sleep(throttleDelayMs);
+                }
+
+                // Check again in case pause occurred during throttle sleep
+                if (!running.get()) {
+                    log.info("Backfill worker cleanly paused after sleep at PK {}. Total rows copied: {}",
+                            currentPk, totalRowsCopied);
+                    return;
                 }
 
                 // If last batch had fewer than batchSize rows, we've reached the end of the historical snapshot
@@ -162,6 +176,10 @@ public class BackfillWorker implements AutoCloseable {
 
     public void stop() {
         running.set(false);
+    }
+
+    public boolean isRunning() {
+        return running.get();
     }
 
     @Override

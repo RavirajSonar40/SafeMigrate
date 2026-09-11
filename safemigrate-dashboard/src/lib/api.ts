@@ -2,7 +2,8 @@ import {
   CreateMigrationRequest, 
   MigrationResponse, 
   PreflightReport, 
-  ApprovalRequest 
+  ApprovalRequest,
+  ReconciliationReport 
 } from './types';
 
 const API_BASE_URL = typeof window !== 'undefined' 
@@ -105,6 +106,43 @@ export async function rollbackMigration(id: string, reason: string): Promise<Mig
     throw new Error(err.message || `Rollback failed (HTTP ${res.status})`);
   }
   return await res.json();
+}
+
+export async function pauseMigration(id: string): Promise<MigrationResponse> {
+  const res = await fetch(`${API_BASE_URL}/${id}/pause`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || `Failed to pause migration (HTTP ${res.status})`);
+  }
+  return await res.json();
+}
+
+export async function resumeMigration(id: string): Promise<MigrationResponse> {
+  const res = await fetch(`${API_BASE_URL}/${id}/resume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || `Failed to resume migration (HTTP ${res.status})`);
+  }
+  return await res.json();
+}
+
+export async function fetchReconciliationReport(id: string): Promise<ReconciliationReport | null> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/${id}/reconciliation`, {
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 }
 
 export async function clearFailedMigrations(): Promise<void> {

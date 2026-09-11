@@ -5,6 +5,7 @@ import com.safemigrate.core.backfill.BackfillWorker;
 import com.safemigrate.core.cutover.CutoverCoordinator;
 import com.safemigrate.core.kafka.WalKafkaConsumer;
 import com.safemigrate.core.preflight.PreflightReport;
+import com.safemigrate.core.reconcile.ReconciliationReport;
 import com.safemigrate.core.state.MigrationState;
 import com.safemigrate.core.wal.WalReader;
 import com.safemigrate.server.dto.MigrationProgressEvent;
@@ -49,6 +50,7 @@ public class MigrationSession {
     private final Instant createdAt = Instant.now();
     private volatile Instant completedAt;
     private volatile String errorMessage;
+    private volatile ReconciliationReport reconciliationReport;
 
     // Running worker references for lifecycle control
     private volatile WalReader walReader;
@@ -116,6 +118,7 @@ public class MigrationSession {
         res.setCompletedAt(completedAt != null ? completedAt.toString() : null);
         res.setPreflightReport(preflightReport);
         res.setErrorMessage(errorMessage);
+        res.setReconciliationReport(reconciliationReport);
         return res;
     }
 
@@ -372,5 +375,13 @@ public class MigrationSession {
 
     public void setApplierConnection(java.sql.Connection applierConnection) {
         this.applierConnection = applierConnection;
+    }
+
+    public ReconciliationReport getReconciliationReport() {
+        return reconciliationReport;
+    }
+
+    public void setReconciliationReport(ReconciliationReport reconciliationReport) {
+        this.reconciliationReport = reconciliationReport;
     }
 }

@@ -153,6 +153,19 @@ public class StateStore implements AutoCloseable {
         return bucket.get();
     }
 
+    // --- Data Reconciliation Audit ---
+
+    public void saveReconciliationReport(String migrationId, String reportJson) {
+        RBucket<String> bucket = redisson.getBucket("migration:" + migrationId + ":reconciliation");
+        bucket.set(reportJson);
+        log.info("Saved reconciliation audit report for migration [{}]", migrationId);
+    }
+
+    public String getReconciliationReport(String migrationId) {
+        RBucket<String> bucket = redisson.getBucket("migration:" + migrationId + ":reconciliation");
+        return bucket.get();
+    }
+
     @Override
     public void close() {
         if (redisson != null && !redisson.isShutdown()) {

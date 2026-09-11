@@ -3,6 +3,7 @@ package com.safemigrate.server.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.safemigrate.core.preflight.PreflightIssue;
 import com.safemigrate.core.preflight.PreflightReport;
+import com.safemigrate.core.reconcile.ReconciliationReport;
 import com.safemigrate.core.state.MigrationState;
 import com.safemigrate.server.dto.ApprovalRequest;
 import com.safemigrate.server.dto.CreateMigrationRequest;
@@ -227,7 +228,7 @@ class MigrationControllerTest {
         PreflightCheckRequest req = new PreflightCheckRequest("orders", "ADD COLUMN note TEXT");
         PreflightReport report = new PreflightReport("orders", true, Collections.emptyList(), "id", true, 1024, 2048, 100000, false);
 
-        when(migrationService.runPreflightCheck("orders", "ADD COLUMN note TEXT")).thenReturn(report);
+        when(migrationService.runPreflightCheck(eq("orders"), eq("ADD COLUMN note TEXT"), any())).thenReturn(report);
 
         mockMvc.perform(post("/api/migrations/preflight")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -235,5 +236,56 @@ class MigrationControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.passed").value(true))
                 .andExpect(jsonPath("$.primaryKeyColumn").value("id"));
+    }
+
+    @Test
+    @DisplayName("POST /api/migrations/{id}/pause - 200 OK")
+    void shouldPauseMigration() throws Exception {
+        MigrationResponse response = new MigrationResponse();
+        response.setId("mig-123");
+        response.setTableName("orders");
+        response.setState(MigrationState.PAUSED);
+
+        when(migrationService.pauseMigration("mig-123")).thenReturn(response);
+
+        mockMvc.perform(post("/api/migrations/mig-123/pause"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("mig-123"))
+                .andExpect(jsonPath("$.state").value("PAUSED"));
+    }
+
+    @Test
+    @DisplayName("POST /api/migrations/{id}/resume - 200 OK")
+    void shouldResumeMigration() throws Exception {
+        MigrationResponse response = new MigrationResponse();
+        response.setId("mig-123");
+        response.setTableName("orders");
+        response.setState(MigrationState.RESUMING);
+
+        when(migrationService.resumeMigration("mig-123")).thenReturn(response);
+
+        mockMvc.perform(post("/api/migrations/mig-123/resume"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value("mig-123"))
+                .andExpect(jsonPath("$.state").value("RESUMING"));
+    }
+
+    @Test
+    @DisplayName("GET /api/migrations/{id}/reconciliation - 200 OK with report")
+    void shouldGetReconciliationReport() throws Exception {
+        ReconciliationReport report = new ReconciliationReport(
+                "orders", "orders__old", true, 1000L, 1000L,
+                123456789L, 123456789L, List.of("id", "amount"), 0L, Collections.emptyList(), 12L
+        );
+
+        when(migrationService.getReconciliationReport("mig-123")).thenReturn(report);
+
+        mockMvc.perform(get("/api/migrations/mig-123/reconciliation"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tableName").value("orders"))
+                .andExpect(jsonPath("$.matched").value(true))
+                .andExpect(jsonPath("$.sourceRowCount").value(1000))
+                .andExpect(jsonPath("$.targetRowCount").value(1000))
+                .andExpect(jsonPath("$.sourceChecksum").value(123456789));
     }
 }

@@ -1,5 +1,7 @@
 package com.safemigrate.core.cutover;
 
+import com.safemigrate.core.reconcile.DataReconciliationService;
+import com.safemigrate.core.reconcile.ReconciliationReport;
 import com.safemigrate.core.state.MigrationState;
 import com.safemigrate.core.state.StateStore;
 import org.postgresql.replication.LogSequenceNumber;
@@ -196,6 +198,11 @@ public class CutoverCoordinator implements AutoCloseable {
 
             if (stateStore != null && migrationId != null) {
                 stateStore.setStatus(migrationId, MigrationState.COMPLETED);
+                try {
+                    reconcile();
+                } catch (Exception reconEx) {
+                    log.warn("Post-cutover reconciliation audit warning for migration [{}]: {}", migrationId, reconEx.getMessage());
+                }
             }
 
             return durationMs;
@@ -390,6 +397,19 @@ public class CutoverCoordinator implements AutoCloseable {
             } catch (SQLException ignored) {
             }
         }
+    }
+
+    /**
+     * Performs a mathematical post-cutover data reconciliation check between the promoted
+     * production table and the old historical table.
+     */
+    public ReconciliationReport reconcile() throws SQLException {
+        DataReconciliationService reconService = new DataReconciliationService(connection);
+        ReconciliationReport report = reconService.reconcile(sourceTable, oldTable);
+        if (stateStore != null && migrationId != null) {
+            stateStore.saveReconciliationReport(migrationId, report.toJson());
+        }
+        return report;
     }
 
     public String getSourceTable() {

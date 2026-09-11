@@ -1,6 +1,7 @@
 package com.safemigrate.server.dto;
 
 import com.safemigrate.core.preflight.PreflightReport;
+import com.safemigrate.core.reconcile.ReconciliationReport;
 import com.safemigrate.core.state.MigrationState;
 
 public class MigrationResponse {
@@ -31,6 +32,7 @@ public class MigrationResponse {
     private PreflightReport preflightReport;
     private String errorMessage;
     private String databaseId;
+    private ReconciliationReport reconciliationReport;
 
     public MigrationResponse() {
     }
@@ -251,5 +253,13 @@ public class MigrationResponse {
         if (this.databaseId == null || this.databaseId.isBlank()) {
             this.databaseId = database;
         }
+    }
+
+    public ReconciliationReport getReconciliationReport() {
+        return reconciliationReport;
+    }
+
+    public void setReconciliationReport(ReconciliationReport reconciliationReport) {
+        this.reconciliationReport = reconciliationReport;
     }
 }

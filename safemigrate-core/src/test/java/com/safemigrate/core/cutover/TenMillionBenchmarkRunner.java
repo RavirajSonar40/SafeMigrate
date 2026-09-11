@@ -3,8 +3,6 @@ package com.safemigrate.core.cutover;
 import com.safemigrate.core.backfill.BackfillWorker;
 import com.safemigrate.core.backfill.ShadowTableManager;
 import com.safemigrate.core.state.StateStore;
-import org.redisson.Redisson;
-import org.redisson.config.Config;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -34,9 +32,7 @@ public class TenMillionBenchmarkRunner {
         String shadowTable = sourceTable + "__shadow";
         String migrationId = "bench-" + UUID.randomUUID();
 
-        Config redisConfig = new Config();
-        redisConfig.useSingleServer().setAddress(REDIS_URL);
-        StateStore stateStore = new StateStore(Redisson.create(redisConfig));
+        StateStore stateStore = new StateStore(REDIS_URL);
 
         try (Connection conn = DriverManager.getConnection(JDBC_URL, "postgres", "password");
              Statement stmt = conn.createStatement()) {

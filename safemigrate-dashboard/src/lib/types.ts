@@ -2,6 +2,8 @@ export type MigrationState =
   | 'INITIALIZING'
   | 'PREFLIGHT_CHECKING'
   | 'BACKFILLING'
+  | 'PAUSED'
+  | 'RESUMING'
   | 'CATCHING_UP'
   | 'READY_FOR_CUTOVER'
   | 'READY_CUTOVER'
@@ -56,6 +58,22 @@ export interface MigrationResponse {
   approvedAt?: string;
   preflightReport?: PreflightReport;
   errorMessage?: string;
+  reconciliationReport?: ReconciliationReport;
+}
+
+export interface ReconciliationReport {
+  tableName: string;
+  comparedTable: string;
+  matched: boolean;
+  sourceRowCount: number;
+  targetRowCount: number;
+  sourceChecksum: number;
+  targetChecksum: number;
+  comparedColumns: string[];
+  discrepancyCount: number;
+  sampleDiscrepancies: string[];
+  executionTimeMs: number;
+  verifiedAt: string;
 }
 
 export interface CreateMigrationRequest {

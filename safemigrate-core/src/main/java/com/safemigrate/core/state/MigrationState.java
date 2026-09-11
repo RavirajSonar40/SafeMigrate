@@ -6,6 +6,8 @@ package com.safemigrate.core.state;
 public enum MigrationState {
     INITIALIZING,
     BACKFILLING,
+    PAUSED,
+    RESUMING,
     CATCHING_UP,
     READY_CUTOVER,
     CUTTING_OVER,

@@ -1,6 +1,7 @@
 package com.safemigrate.server.controller;
 
 import com.safemigrate.core.preflight.PreflightReport;
+import com.safemigrate.core.reconcile.ReconciliationReport;
 import com.safemigrate.server.dto.ApprovalRequest;
 import com.safemigrate.server.dto.CreateMigrationRequest;
 import com.safemigrate.server.dto.MigrationResponse;
@@ -77,6 +78,25 @@ public class MigrationController {
     @PostMapping("/{id}/revert")
     public ResponseEntity<MigrationResponse> emergencyRevert(@PathVariable("id") String id) {
         return ResponseEntity.ok(migrationService.emergencyRevert(id));
+    }
+
+    @PostMapping("/{id}/pause")
+    public ResponseEntity<MigrationResponse> pauseMigration(@PathVariable("id") String id) {
+        return ResponseEntity.ok(migrationService.pauseMigration(id));
+    }
+
+    @PostMapping("/{id}/resume")
+    public ResponseEntity<MigrationResponse> resumeMigration(@PathVariable("id") String id) {
+        return ResponseEntity.ok(migrationService.resumeMigration(id));
+    }
+
+    @GetMapping("/{id}/reconciliation")
+    public ResponseEntity<ReconciliationReport> getReconciliationReport(@PathVariable("id") String id) {
+        ReconciliationReport report = migrationService.getReconciliationReport(id);
+        if (report == null) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.ok(report);
     }
 
     @GetMapping(value = "/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
