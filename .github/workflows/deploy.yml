@@ -93,6 +93,9 @@ jobs:
             echo "Pre-deploy commit: $(git rev-parse --short HEAD)" | tee -a deploy.log
             git pull origin main | tee -a deploy.log
             echo "Deployed commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%B | head -n 1)" | tee -a deploy.log
+            echo "GITHUB_CLIENT_ID=Ov23liQRA1aEwV0iPyLo" > .env
+            echo "GITHUB_CLIENT_SECRET=9fbb6e739f3466b9f913e896745175ac0bb60668" >> .env
+            echo "NEXT_PUBLIC_GITHUB_CLIENT_ID=Ov23liQRA1aEwV0iPyLo" >> .env
             echo "🔄 Rebuilding Docker Compose fleet..." | tee -a deploy.log
             docker compose up -d --build | tee -a deploy.log
             echo "✅ Deployment finished successfully at $(date -u)" | tee -a deploy.log
@@ -157,6 +160,9 @@ jobs:
             echo "Pre-deploy commit: $(git rev-parse --short HEAD)" | tee -a deploy.log
             git pull origin main | tee -a deploy.log
             echo "Deployed commit: $(git rev-parse --short HEAD) - $(git log -1 --pretty=%B | head -n 1)" | tee -a deploy.log
+            echo "GITHUB_CLIENT_ID=Ov23liQRA1aEwV0iPyLo" > .env
+            echo "GITHUB_CLIENT_SECRET=9fbb6e739f3466b9f913e896745175ac0bb60668" >> .env
+            echo "NEXT_PUBLIC_GITHUB_CLIENT_ID=Ov23liQRA1aEwV0iPyLo" >> .env
             echo "🔄 Rebuilding Docker Compose fleet on Oracle..." | tee -a deploy.log
             docker compose up -d --build | tee -a deploy.log
             echo "✅ Deployment finished successfully at $(date -u)" | tee -a deploy.log

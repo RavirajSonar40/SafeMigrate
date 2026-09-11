@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+function getBaseUrl(request: NextRequest): string {
+  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || '15.252.16.216:3000';
+  const proto = request.headers.get('x-forwarded-proto') || (host.includes('localhost') ? 'http' : 'http');
+  return `${proto}://${host}`;
+}
+
 export async function GET(request: NextRequest) {
+  const baseUrl = getBaseUrl(request);
   const { searchParams } = new URL(request.url);
   const code = searchParams.get('code');
   const state = searchParams.get('state');
@@ -9,25 +16,25 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     return NextResponse.redirect(
-      new URL(`/login?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription || '')}`, request.url)
+      new URL(`/login?error=${encodeURIComponent(error)}&error_description=${encodeURIComponent(errorDescription || '')}`, baseUrl)
     );
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL('/login?error=missing_code', request.url));
+    return NextResponse.redirect(new URL('/login?error=missing_code', baseUrl));
   }
 
   // Validate CSRF state
   const storedState = request.cookies.get('safemigrate_oauth_state')?.value;
   if (storedState && state && storedState !== state) {
-    return NextResponse.redirect(new URL('/login?error=csrf_state_mismatch', request.url));
+    return NextResponse.redirect(new URL('/login?error=csrf_state_mismatch', baseUrl));
   }
 
-  const clientId = process.env.GITHUB_CLIENT_ID || process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID;
-  const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+  const clientId = process.env.GITHUB_CLIENT_ID || process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || 'Ov23liQRA1aEwV0iPyLo';
+  const clientSecret = process.env.GITHUB_CLIENT_SECRET || '9fbb6e739f3466b9f913e896745175ac0bb60668';
 
   if (!clientId || !clientSecret) {
-    return NextResponse.redirect(new URL('/login?error=oauth_credentials_not_set', request.url));
+    return NextResponse.redirect(new URL('/login?error=oauth_credentials_not_set', baseUrl));
   }
 
   try {
@@ -52,7 +59,7 @@ export async function GET(request: NextRequest) {
       const errCode = tokenData.error || 'token_exchange_failed';
       const errDesc = tokenData.error_description || 'Failed to obtain access token from GitHub';
       return NextResponse.redirect(
-        new URL(`/login?error=${encodeURIComponent(errCode)}&error_description=${encodeURIComponent(errDesc)}`, request.url)
+        new URL(`/login?error=${encodeURIComponent(errCode)}&error_description=${encodeURIComponent(errDesc)}`, baseUrl)
       );
     }
 
@@ -105,11 +112,9 @@ export async function GET(request: NextRequest) {
       team: userData.company || 'Core Data & Database Reliability',
     };
 
-    const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
-    const proto = request.headers.get('x-forwarded-proto') || (host.startsWith('localhost') ? 'http' : 'http');
-    const isHttps = proto === 'https';
+    const isHttps = baseUrl.startsWith('https://');
 
-    const response = NextResponse.redirect(new URL('/overview', request.url));
+    const response = NextResponse.redirect(new URL('/overview', baseUrl));
 
     // Store signed session cookie (HTTP-only)
     response.cookies.set('safemigrate_session', Buffer.from(JSON.stringify(userSession)).toString('base64'), {
@@ -135,6 +140,6 @@ export async function GET(request: NextRequest) {
     return response;
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error during authentication';
-    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, request.url));
+    return NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(message)}`, baseUrl));
   }
 }
