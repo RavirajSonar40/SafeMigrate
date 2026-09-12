@@ -51,6 +51,11 @@ public class MigrationSession {
     private volatile Instant completedAt;
     private volatile String errorMessage;
     private volatile ReconciliationReport reconciliationReport;
+    private volatile String sourceLsn;
+    private volatile long divergenceEvents = 0L;
+    private volatile Long lastCheckpointPk;
+    private volatile String activeChaosAction;
+    private final java.util.List<String> resilienceLogs = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     // Running worker references for lifecycle control
     private volatile WalReader walReader;
@@ -119,6 +124,12 @@ public class MigrationSession {
         res.setPreflightReport(preflightReport);
         res.setErrorMessage(errorMessage);
         res.setReconciliationReport(reconciliationReport);
+        res.setSourceLsn(sourceLsn);
+        res.setAppliedLsnStr(lastAppliedLsn != null ? org.postgresql.replication.LogSequenceNumber.valueOf(lastAppliedLsn).asString() : null);
+        res.setDivergenceEvents(divergenceEvents);
+        res.setLastCheckpointPk(lastCheckpointPk);
+        res.setActiveChaosAction(activeChaosAction);
+        res.setResilienceEvents(new java.util.ArrayList<>(resilienceLogs));
         return res;
     }
 
@@ -383,5 +394,45 @@ public class MigrationSession {
 
     public void setReconciliationReport(ReconciliationReport reconciliationReport) {
         this.reconciliationReport = reconciliationReport;
+    }
+
+    public String getSourceLsn() {
+        return sourceLsn;
+    }
+
+    public void setSourceLsn(String sourceLsn) {
+        this.sourceLsn = sourceLsn;
+    }
+
+    public long getDivergenceEvents() {
+        return divergenceEvents;
+    }
+
+    public void setDivergenceEvents(long divergenceEvents) {
+        this.divergenceEvents = divergenceEvents;
+    }
+
+    public Long getLastCheckpointPk() {
+        return lastCheckpointPk;
+    }
+
+    public void setLastCheckpointPk(Long lastCheckpointPk) {
+        this.lastCheckpointPk = lastCheckpointPk;
+    }
+
+    public String getActiveChaosAction() {
+        return activeChaosAction;
+    }
+
+    public void setActiveChaosAction(String activeChaosAction) {
+        this.activeChaosAction = activeChaosAction;
+    }
+
+    public java.util.List<String> getResilienceLogs() {
+        return resilienceLogs;
+    }
+
+    public void addResilienceLog(String logEntry) {
+        this.resilienceLogs.add(logEntry);
     }
 }

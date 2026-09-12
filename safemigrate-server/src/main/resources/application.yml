@@ -18,4 +18,4 @@ safemigrate:
     default-batch-size: 100
     default-throttle-delay-ms: 10
     max-lock-timeout-ms: 2000
-    approval-required: false
+    approval-required: true

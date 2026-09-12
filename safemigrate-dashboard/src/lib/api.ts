@@ -3,7 +3,13 @@ import {
   MigrationResponse, 
   PreflightReport, 
   ApprovalRequest,
-  ReconciliationReport 
+  ReconciliationReport,
+  ChaosAction,
+  ChaosInjectionResponse,
+  RecoveryResponse,
+  MigrationPlanDto,
+  DependencyGraphDto,
+  WorkerStatusDto
 } from './types';
 
 const API_BASE_URL = typeof window !== 'undefined' 
@@ -71,7 +77,7 @@ export async function runPreflight(tableName: string, ddlStatement: string, data
 }
 
 export async function approveMigration(id: string, request: ApprovalRequest): Promise<MigrationResponse> {
-  const approver = request.approver || request.approvedBy || 'dba@enterprise.internal';
+  const approver = request.approver || 'dba@enterprise.internal';
   const res = await fetch(`${API_BASE_URL}/${id}/approve?approver=${encodeURIComponent(approver)}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -154,3 +160,106 @@ export async function clearFailedMigrations(): Promise<void> {
     console.error('Failed to clear failed migrations:', err);
   }
 }
+
+export async function injectChaos(id: string, action: ChaosAction, notes?: string): Promise<ChaosInjectionResponse> {
+  const res = await fetch(`${API_BASE_URL}/${id}/chaos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, notes })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || `Failed to inject chaos: ${action}`);
+  }
+  return await res.json();
+}
+
+export async function recoverMigration(id: string): Promise<RecoveryResponse> {
+  const res = await fetch(`${API_BASE_URL}/${id}/recover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || 'Failed to recover migration');
+  }
+  return await res.json();
+}
+
+export async function planMigration(request: CreateMigrationRequest): Promise<MigrationPlanDto> {
+  const res = await fetch(`${API_BASE_URL}/plan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || 'Failed to generate migration plan');
+  }
+  return await res.json();
+}
+
+export async function verifyMigration(id: string): Promise<ReconciliationReport> {
+  const res = await fetch(`${API_BASE_URL}/${id}/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: `HTTP ${res.status}` }));
+    throw new Error(err.message || 'Failed to verify migration data parity');
+  }
+  return await res.json();
+}
+
+export async function fetchWorkers(migrationId?: string): Promise<WorkerStatusDto[]> {
+  try {
+    const url = migrationId ? `${API_BASE_URL}/${migrationId}/workers` : `${API_BASE_URL}/workers`;
+    const res = await fetch(url, {
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchTableDependencies(tableName: string, dbId?: string): Promise<DependencyGraphDto | null> {
+  try {
+    const targetDb = dbId || 'supabase-production';
+    const cleanTable = tableName.replace(/^public\./, '');
+    const res = await fetch(`/api/databases/${targetDb}/tables/${cleanTable}/dependencies`, {
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export const api = {
+  fetchMigrations,
+  fetchMigration,
+  submitMigration,
+  runPreflight,
+  preflightCheck: runPreflight,
+  approveMigration,
+  executeCutover,
+  rollbackMigration,
+  pauseMigration,
+  resumeMigration,
+  fetchReconciliationReport,
+  clearFailedMigrations,
+  injectChaos,
+  recoverMigration,
+  planMigration,
+  verifyMigration,
+  fetchWorkers,
+  fetchTableDependencies,
+};
+
+

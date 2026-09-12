@@ -67,4 +67,11 @@ public class DatabaseController {
             @RequestParam(name = "limit", defaultValue = "50") int limit) throws SQLException {
         return ResponseEntity.ok(databaseService.getTableData(id, tableName, limit));
     }
+
+    @GetMapping("/{id}/tables/{tableName}/dependencies")
+    public ResponseEntity<DependencyGraphDto> getTableDependencies(
+            @PathVariable("id") String id,
+            @PathVariable("tableName") String tableName) throws SQLException {
+        return ResponseEntity.ok(databaseService.analyzeDependencies(id, tableName));
+    }
 }

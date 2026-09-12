@@ -6,9 +6,15 @@ import com.safemigrate.core.preflight.PreflightReport;
 import com.safemigrate.core.reconcile.ReconciliationReport;
 import com.safemigrate.core.state.MigrationState;
 import com.safemigrate.server.dto.ApprovalRequest;
+import com.safemigrate.server.dto.ChaosAction;
+import com.safemigrate.server.dto.ChaosInjectionRequest;
+import com.safemigrate.server.dto.ChaosInjectionResponse;
 import com.safemigrate.server.dto.CreateMigrationRequest;
+import com.safemigrate.server.dto.MigrationPlanDto;
 import com.safemigrate.server.dto.MigrationResponse;
 import com.safemigrate.server.dto.PreflightCheckRequest;
+import com.safemigrate.server.dto.RecoveryResponse;
+import com.safemigrate.server.dto.WorkerStatusDto;
 import com.safemigrate.server.service.MigrationService;
 import com.safemigrate.server.service.MigrationSseService;
 import org.junit.jupiter.api.DisplayName;
@@ -287,5 +293,90 @@ class MigrationControllerTest {
                 .andExpect(jsonPath("$.sourceRowCount").value(1000))
                 .andExpect(jsonPath("$.targetRowCount").value(1000))
                 .andExpect(jsonPath("$.sourceChecksum").value(123456789));
+    }
+
+    @Test
+    @DisplayName("POST /api/migrations/plan - 200 OK with MigrationPlanDto")
+    void shouldGenerateMigrationPlan() throws Exception {
+        CreateMigrationRequest req = new CreateMigrationRequest("orders", "ALTER COLUMN amount TYPE NUMERIC(14,4)");
+        MigrationPlanDto plan = new MigrationPlanDto();
+        plan.setTableName("orders");
+        plan.setDdlStatement("ALTER COLUMN amount TYPE NUMERIC(14,4)");
+        plan.setEstimatedRows(1000000L);
+        plan.setRiskLevel("LOW");
+        plan.setEstimatedDurationFormatted("40s");
+
+        when(migrationService.generatePlan(any())).thenReturn(plan);
+
+        mockMvc.perform(post("/api/migrations/plan")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tableName").value("orders"))
+                .andExpect(jsonPath("$.riskLevel").value("LOW"))
+                .andExpect(jsonPath("$.estimatedDurationFormatted").value("40s"));
+    }
+
+    @Test
+    @DisplayName("POST /api/migrations/{id}/chaos - 200 OK with ChaosInjectionResponse")
+    void shouldInjectChaos() throws Exception {
+        ChaosInjectionRequest req = new ChaosInjectionRequest(ChaosAction.KILL_BACKFILL_WORKER);
+        ChaosInjectionResponse res = new ChaosInjectionResponse("mig-123", ChaosAction.KILL_BACKFILL_WORKER, true, "Worker halted");
+        res.setAffectedComponent("BACKFILL_WORKER");
+        res.setCurrentState("PAUSED");
+
+        when(migrationService.injectChaos(eq("mig-123"), any())).thenReturn(res);
+
+        mockMvc.perform(post("/api/migrations/mig-123/chaos")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(req)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.action").value("KILL_BACKFILL_WORKER"))
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.affectedComponent").value("BACKFILL_WORKER"));
+    }
+
+    @Test
+    @DisplayName("POST /api/migrations/{id}/recover - 200 OK with RecoveryResponse")
+    void shouldRecoverSession() throws Exception {
+        RecoveryResponse res = new RecoveryResponse("mig-123", true, "Recovered", "ALL_WORKERS", 5000L);
+        res.setCurrentState("BACKFILLING");
+
+        when(migrationService.recoverSession("mig-123")).thenReturn(res);
+
+        mockMvc.perform(post("/api/migrations/mig-123/recover"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.recovered").value(true))
+                .andExpect(jsonPath("$.resumedFromPk").value(5000))
+                .andExpect(jsonPath("$.eventsLost").value(0))
+                .andExpect(jsonPath("$.duplicateEvents").value(0));
+    }
+
+    @Test
+    @DisplayName("POST /api/migrations/{id}/verify - 200 OK with ReconciliationReport")
+    void shouldVerifyOnDemand() throws Exception {
+        ReconciliationReport report = new ReconciliationReport(
+                "orders", "orders__shadow", true, 5000L, 5000L,
+                999999L, 999999L, List.of("id", "status"), 0L, Collections.emptyList(), 15L
+        );
+
+        when(migrationService.verifyMigrationOnDemand("mig-123")).thenReturn(report);
+
+        mockMvc.perform(post("/api/migrations/mig-123/verify"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.matched").value(true))
+                .andExpect(jsonPath("$.sourceRowCount").value(5000));
+    }
+
+    @Test
+    @DisplayName("GET /api/migrations/{id}/workers - 200 OK with list of workers")
+    void shouldGetWorkers() throws Exception {
+        WorkerStatusDto worker = new WorkerStatusDto("w1", "PostgreSQL WAL Reader", "WAL_READER", "HEALTHY");
+        when(migrationService.getClusterWorkers("mig-123")).thenReturn(List.of(worker));
+
+        mockMvc.perform(get("/api/migrations/mig-123/workers"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("PostgreSQL WAL Reader"))
+                .andExpect(jsonPath("$[0].status").value("HEALTHY"));
     }
 }

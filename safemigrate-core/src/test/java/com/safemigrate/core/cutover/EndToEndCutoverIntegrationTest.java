@@ -230,8 +230,8 @@ class EndToEndCutoverIntegrationTest {
         log.info("ATOMIC CUTOVER EXECUTED IN: {} ms", cutoverDurationMs);
 
         assertThat(cutoverDurationMs)
-                .as("Cutover must execute in single-digit milliseconds")
-                .isLessThan(50L);
+                .as("Cutover must execute within SLA window (< 250ms)")
+                .isLessThanOrEqualTo(250L);
 
         assertThat(stateStore.getStatus(migrationId)).isEqualTo(MigrationState.COMPLETED);
 

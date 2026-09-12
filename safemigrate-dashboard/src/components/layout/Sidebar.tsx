@@ -26,7 +26,7 @@ export default function Sidebar() {
     { label: 'Migrations', href: '/overview#migrations', icon: 'move_up', isLink: true },
     { label: 'Databases', href: '/databases', icon: 'database', isLink: true },
     { label: 'DB Explorer', href: '/explorer', icon: 'table_chart', isLink: true },
-    { label: 'Workers', modalKey: 'workers', icon: 'sync_alt', isLink: false },
+    { label: 'Workers', href: '/operations', icon: 'sync_alt', isLink: true },
     { label: 'Events', modalKey: 'events', icon: 'stream', isLink: false },
     { label: 'Approvals', modalKey: 'approvals', icon: 'verified_user', badge: '1', isLink: false },
     { label: 'Audit Logs', modalKey: 'audit', icon: 'receipt_long', isLink: false },

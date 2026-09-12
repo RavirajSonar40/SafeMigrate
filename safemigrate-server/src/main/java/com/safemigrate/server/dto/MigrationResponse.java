@@ -33,8 +33,62 @@ public class MigrationResponse {
     private String errorMessage;
     private String databaseId;
     private ReconciliationReport reconciliationReport;
+    private String sourceLsn;
+    private String appliedLsnStr;
+    private long divergenceEvents = 0L;
+    private Long lastCheckpointPk;
+    private String activeChaosAction;
+    private java.util.List<String> resilienceEvents = new java.util.ArrayList<>();
 
     public MigrationResponse() {
+    }
+
+    public String getSourceLsn() {
+        return sourceLsn;
+    }
+
+    public void setSourceLsn(String sourceLsn) {
+        this.sourceLsn = sourceLsn;
+    }
+
+    public String getAppliedLsnStr() {
+        return appliedLsnStr;
+    }
+
+    public void setAppliedLsnStr(String appliedLsnStr) {
+        this.appliedLsnStr = appliedLsnStr;
+    }
+
+    public long getDivergenceEvents() {
+        return divergenceEvents;
+    }
+
+    public void setDivergenceEvents(long divergenceEvents) {
+        this.divergenceEvents = divergenceEvents;
+    }
+
+    public Long getLastCheckpointPk() {
+        return lastCheckpointPk;
+    }
+
+    public void setLastCheckpointPk(Long lastCheckpointPk) {
+        this.lastCheckpointPk = lastCheckpointPk;
+    }
+
+    public String getActiveChaosAction() {
+        return activeChaosAction;
+    }
+
+    public void setActiveChaosAction(String activeChaosAction) {
+        this.activeChaosAction = activeChaosAction;
+    }
+
+    public java.util.List<String> getResilienceEvents() {
+        return resilienceEvents;
+    }
+
+    public void setResilienceEvents(java.util.List<String> resilienceEvents) {
+        this.resilienceEvents = resilienceEvents;
     }
 
     public String getId() {

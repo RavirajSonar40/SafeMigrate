@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
+import { isDemoMode, setDemoMode } from '@/lib/demoMode';
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -11,6 +12,18 @@ export default function Header() {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [demoActive, setDemoActive] = useState(false);
+
+  useEffect(() => {
+    setDemoActive(isDemoMode());
+  }, []);
+
+  const handleToggleDemo = () => {
+    const next = !demoActive;
+    setDemoActive(next);
+    setDemoMode(next);
+    window.location.reload();
+  };
   interface ClusterItem {
     id: string;
     name: string;
@@ -135,12 +148,32 @@ export default function Header() {
           )}
         </div>
 
-        {/* Right: Search, Notifications, Profile */}
-        <div className="flex items-center gap-4">
+        {/* Right: Demo Mode, Search, Notifications, Profile */}
+        <div className="flex items-center gap-3">
+          {/* Interactive Demo Mode Toggle */}
+          <button
+            onClick={handleToggleDemo}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer ${
+              demoActive
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-sm animate-pulse'
+                : 'bg-surface-container-low text-on-surface-variant border-outline-variant/30 hover:text-on-surface hover:bg-surface-container'
+            }`}
+            title="Toggle interactive 8.2M row production simulation"
+          >
+            <span className="material-symbols-outlined text-[16px] text-amber-400">
+              {demoActive ? 'bolt' : 'play_circle'}
+            </span>
+            <span className="font-mono text-[11px] font-bold">
+              {demoActive ? 'DEMO: ACTIVE' : 'Demo Mode'}
+            </span>
+          </button>
+
           {/* Global Search Bar (opens search dialog) */}
           <button
-            onClick={() => setShowSearchModal(true)}
-            className="flex items-center gap-2 bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 text-on-surface-variant px-3 py-1.5 rounded-lg text-sm w-56 sm:w-72 justify-between cursor-pointer transition-colors"
+            onClick={() => {
+              window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }));
+            }}
+            className="flex items-center gap-2 bg-surface-container-low hover:bg-surface-container border border-outline-variant/30 text-on-surface-variant px-3 py-1.5 rounded-lg text-sm w-44 sm:w-64 justify-between cursor-pointer transition-colors"
           >
             <span className="flex items-center gap-2 truncate">
               <span className="material-symbols-outlined text-[16px] text-outline">search</span>

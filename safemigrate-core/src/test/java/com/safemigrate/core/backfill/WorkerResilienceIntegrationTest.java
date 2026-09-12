@@ -258,7 +258,7 @@ class WorkerResilienceIntegrationTest {
 
         assertThatThrownBy(() -> standbyAttempt.get(5, TimeUnit.SECONDS))
                 .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage("Failed to acquire migration lock for table '" + testTable + "'. Another migration is currently active.");
+                .hasRootCauseMessage("Failed to acquire migration lock for table '" + testTable + "' on database 'default'. Another migration is currently active.");
 
         // Worker 1 "dies" abruptly without unlocking (worker1Lock.unlock() is NEVER called).
         log.info("Worker 1 died without unlocking. Waiting 3.5s for Redisson lease auto-expiry...");

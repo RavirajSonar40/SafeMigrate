@@ -3,9 +3,14 @@ package com.safemigrate.server.controller;
 import com.safemigrate.core.preflight.PreflightReport;
 import com.safemigrate.core.reconcile.ReconciliationReport;
 import com.safemigrate.server.dto.ApprovalRequest;
+import com.safemigrate.server.dto.ChaosInjectionRequest;
+import com.safemigrate.server.dto.ChaosInjectionResponse;
 import com.safemigrate.server.dto.CreateMigrationRequest;
+import com.safemigrate.server.dto.MigrationPlanDto;
 import com.safemigrate.server.dto.MigrationResponse;
 import com.safemigrate.server.dto.PreflightCheckRequest;
+import com.safemigrate.server.dto.RecoveryResponse;
+import com.safemigrate.server.dto.WorkerStatusDto;
 import com.safemigrate.server.service.MigrationService;
 import com.safemigrate.server.service.MigrationSseService;
 import jakarta.validation.Valid;
@@ -110,6 +115,33 @@ public class MigrationController {
     public ResponseEntity<PreflightReport> runPreflightCheck(@RequestBody @Valid PreflightCheckRequest request) throws SQLException {
         PreflightReport report = migrationService.runPreflightCheck(request.getTableName(), request.getDdlStatement(), request.getDatabaseId());
         return ResponseEntity.ok(report);
+    }
+
+    @PostMapping("/plan")
+    public ResponseEntity<MigrationPlanDto> planMigration(@RequestBody @Valid CreateMigrationRequest request) {
+        return ResponseEntity.ok(migrationService.generatePlan(request));
+    }
+
+    @PostMapping("/{id}/chaos")
+    public ResponseEntity<ChaosInjectionResponse> injectChaos(
+            @PathVariable("id") String id,
+            @RequestBody @Valid ChaosInjectionRequest request) {
+        return ResponseEntity.ok(migrationService.injectChaos(id, request));
+    }
+
+    @PostMapping("/{id}/recover")
+    public ResponseEntity<RecoveryResponse> recoverSession(@PathVariable("id") String id) {
+        return ResponseEntity.ok(migrationService.recoverSession(id));
+    }
+
+    @PostMapping("/{id}/verify")
+    public ResponseEntity<ReconciliationReport> verifyMigration(@PathVariable("id") String id) {
+        return ResponseEntity.ok(migrationService.verifyMigrationOnDemand(id));
+    }
+
+    @GetMapping("/{id}/workers")
+    public ResponseEntity<List<WorkerStatusDto>> getWorkers(@PathVariable("id") String id) {
+        return ResponseEntity.ok(migrationService.getClusterWorkers(id));
     }
 
     @DeleteMapping("/failed")
