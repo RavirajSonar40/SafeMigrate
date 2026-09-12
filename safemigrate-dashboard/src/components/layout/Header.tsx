@@ -76,11 +76,51 @@ export default function Header() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  const notifications = [
-    { id: 1, title: 'Replication In-Sync', desc: 'Table orders CDC lag reached 0 ms baseline.', time: '2m ago', type: 'success' },
-    { id: 2, title: 'Preflight Check Passed', desc: 'Zero lock contention detected on target table.', time: '14m ago', type: 'info' },
-    { id: 3, title: 'Cutover Approval Ready', desc: 'Dual sign-off requested for active migration.', time: '28m ago', type: 'warning' },
-  ];
+  interface AppNotification {
+    id: string;
+    title: string;
+    desc: string;
+    time: string;
+    type: 'success' | 'warning' | 'info';
+    unread: boolean;
+  }
+
+  const [notificationsList, setNotificationsList] = useState<AppNotification[]>([
+    {
+      id: 'n1',
+      title: '✓ Migration #1042 completed',
+      desc: 'Atomic cutover completed in 28ms. 0 downtime, 0 locks held.',
+      time: '2m ago',
+      type: 'success',
+      unread: true,
+    },
+    {
+      id: 'n2',
+      title: '⚠ CDC lag exceeded threshold',
+      desc: 'CDC replication lag reached 420ms on orders partition. Dynamic throttle engaged.',
+      time: '6m ago',
+      type: 'warning',
+      unread: true,
+    },
+    {
+      id: 'n3',
+      title: '⚠ Worker restarted from checkpoint',
+      desc: 'Worker #2 restored from LSN 0/16B2540. Exactly-once idempotency preserved.',
+      time: '11m ago',
+      type: 'warning',
+      unread: true,
+    },
+    {
+      id: 'n4',
+      title: '✓ 100% parity certified',
+      desc: '8,200,000 of 8,200,000 rows verified by Verification Engine with matching MD5 checksums.',
+      time: '18m ago',
+      type: 'success',
+      unread: true,
+    },
+  ]);
+
+  const unreadCount = notificationsList.filter((n) => n.unread).length;
 
   const searchableItems = [
     { type: 'Table', title: 'public.orders', subtitle: '1,466 rows · Primary Key (id)', link: '/overview' },
@@ -192,29 +232,76 @@ export default function Header() {
               className="p-1.5 text-on-surface-variant hover:text-on-surface transition-colors relative cursor-pointer rounded-lg hover:bg-surface-container"
             >
               <span className="material-symbols-outlined text-[20px]">notifications</span>
-              <span className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full animate-ping"></span>
-              <span className="absolute top-1 right-1 w-2 h-2 bg-primary rounded-full"></span>
+              {unreadCount > 0 ? (
+                <span className="absolute -top-1 -right-1 bg-amber-500 text-black text-[10px] font-mono font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
+                  {unreadCount}
+                </span>
+              ) : (
+                <span className="absolute top-1 right-1 w-2 h-2 bg-primary/60 rounded-full"></span>
+              )}
             </button>
 
             {/* Notifications Dropdown */}
             {showNotifications && (
-              <div className="absolute right-0 top-12 w-80 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-2xl p-3 z-50 animate-fade-in flex flex-col gap-2">
+              <div className="absolute right-0 top-12 w-88 rounded-xl bg-surface-container-lowest border border-outline-variant/30 shadow-2xl p-3 z-50 animate-fade-in flex flex-col gap-2.5">
                 <div className="flex items-center justify-between pb-2 border-b border-outline-variant/15 text-xs font-semibold text-on-surface">
-                  <span>Cluster Notifications</span>
-                  <span className="text-[10px] font-mono text-primary bg-primary/10 px-1.5 py-0.5 rounded border border-primary/20">
-                    Live Feed
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span>Cluster Notifications</span>
+                    {unreadCount > 0 && (
+                      <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                        {unreadCount} New
+                      </span>
+                    )}
+                  </div>
+                  {unreadCount > 0 && (
+                    <button
+                      onClick={() => setNotificationsList((prev) => prev.map((n) => ({ ...n, unread: false })))}
+                      className="text-[10px] font-mono text-primary hover:underline cursor-pointer"
+                    >
+                      Mark all read
+                    </button>
+                  )}
                 </div>
-                <div className="flex flex-col gap-1.5">
-                  {notifications.map((n) => (
-                    <div key={n.id} className="p-2 rounded-lg bg-surface-container-low hover:bg-surface-container text-xs flex flex-col gap-0.5 border border-outline-variant/10">
-                      <div className="flex items-center justify-between font-semibold text-on-surface text-[11px]">
-                        <span>{n.title}</span>
+
+                <div className="flex flex-col gap-1.5 max-h-80 overflow-y-auto">
+                  {notificationsList.map((n) => (
+                    <div
+                      key={n.id}
+                      onClick={() =>
+                        setNotificationsList((prev) =>
+                          prev.map((item) => (item.id === n.id ? { ...item, unread: false } : item))
+                        )
+                      }
+                      className={`p-2.5 rounded-lg text-xs flex flex-col gap-1 border transition-colors cursor-pointer ${
+                        n.unread
+                          ? 'bg-surface-container border-primary/25 hover:border-primary/50'
+                          : 'bg-surface-container-low/60 border-outline-variant/10 opacity-75 hover:opacity-100'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between font-semibold text-[11px]">
+                        <span className={`flex items-center gap-1.5 ${n.type === 'success' ? 'text-emerald-400' : 'text-amber-400'}`}>
+                          <span className="material-symbols-outlined text-[15px]">
+                            {n.type === 'success' ? 'check_circle' : 'warning'}
+                          </span>
+                          <span className="font-mono font-bold">{n.title}</span>
+                        </span>
                         <span className="text-[10px] text-outline font-mono">{n.time}</span>
                       </div>
-                      <span className="text-[11px] text-on-surface-variant leading-tight">{n.desc}</span>
+                      <span className="text-[11px] text-on-surface-variant leading-tight pl-5">{n.desc}</span>
                     </div>
                   ))}
+                </div>
+
+                <div className="pt-2 border-t border-outline-variant/15 flex items-center justify-between text-[11px] font-mono">
+                  <Link
+                    href="/activity"
+                    onClick={() => setShowNotifications(false)}
+                    className="text-primary hover:underline flex items-center gap-1"
+                  >
+                    <span>View Activity Timeline</span>
+                    <span className="material-symbols-outlined text-[13px]">arrow_forward</span>
+                  </Link>
+                  <span className="text-outline text-[10px]">Real-time WAL</span>
                 </div>
               </div>
             )}

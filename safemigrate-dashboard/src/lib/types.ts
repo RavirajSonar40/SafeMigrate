@@ -19,20 +19,34 @@ export interface PreflightIssue {
   remediation?: string;
 }
 
+export interface PreflightCheckItem {
+  checkName: string;
+  passed: boolean;
+  message: string;
+}
+
 export interface PreflightReport {
   tableName: string;
+  sourceTable?: string;
   passed: boolean;
   issues: PreflightIssue[];
   estimatedRows?: number;
+  rowCount?: number;
   tableSizeBytes?: number;
   activeLocksDetected?: number;
   primaryKeyColumn?: string;
   replicaIdentityFull?: boolean;
   estimatedRequiredDiskBytes?: number;
   availableDiskBytes?: number;
+  diskSpaceAvailableBytes?: number;
+  activeTransactionsCount?: number;
+  replicationSlotAvailable?: boolean;
+  blockingDdlDetected?: boolean;
   activeLockContention?: boolean;
   warnings?: string[];
   errors?: string[];
+  blockers?: string[];
+  checks?: PreflightCheckItem[];
 }
 
 export interface MigrationResponse {
